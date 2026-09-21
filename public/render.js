@@ -13,7 +13,7 @@ const MAX_DPR = 1.5;
 const LINE_HEIGHT = 1.25;
 const CHAR_ASPECT = 0.6; // IBM Plex Mono advance width / font size
 const LOOK_FADE_S = 2.2; // glyph family + palette crossfade, matched to the pattern crossfade
-const GAMMA = 0.7; // lifts mid-brightness cells so faint structure stays legible
+const GAMMA = 0.55; // lifts mid-brightness cells: most of a picture sits at 0.2-0.5, which must still read on black
 const EXPORT_MAX_PIXELS = 15.5e6; // just under iOS Safari's 16.78 MP canvas ceiling; desktops allow far more
 const EXPORT_MAX_EDGE = 8192;
 const FONT_FAMILY = `"IBM Plex Mono", "Cascadia Mono", Consolas, monospace`;
@@ -27,7 +27,7 @@ const ORIENTATION_KEYS = ["h", "v", "d1", "d2"]; // index matches marks.js orien
 // that read better as varied characters than as a weight ramp. A directional family's
 // entries above 0 are { h, v, d1, d2 }, each itself a glyph or an array of variants.
 export const GLYPH_RAMPS = {
-  blocks: [" ", "░", "▒", "▓", "█"],
+  blocks: [" ", "░", "▒", "▓", "█", "█", "█"], // solid from the middle up: a shade glyph covers a quarter of its cell, so the ramp must reach █ early to read as "heavy"
   dots: [" ", "·", "∙", "•", "●"],
   braille: [" ", "⠁", "⠃", "⠇", "⡇", "⣇", "⣧", "⣷", "⣿"],
   lines: [" ", "╌", "─", "┼", "╪", "╬", "█"],
@@ -237,16 +237,16 @@ export class AsciiRenderer {
   }
 
   /** One layer's field, with its look (or its two looks mid-fade), onto any context/grid. */
-  paintLayer({ field, look, gain = 1, accent = 0 }, ctx, geo) {
+  paintLayer({ field, look, gain = 1, accent = 0, alpha = 1 }, ctx, geo) {
     const directional = DIRECTIONAL_FAMILIES.has(look.from.glyphs) || DIRECTIONAL_FAMILIES.has(look.to.glyphs);
     const orientBuf = directional ? this.orientationsFor(look, field) : null;
-    if (look.mix < 1) this.pass(field, this.atlas(look.from, geo), 1 - look.mix, ctx, geo, gain, orientBuf, accent);
-    this.pass(field, this.atlas(look.to, geo), look.mix < 1 ? look.mix : 1, ctx, geo, gain, orientBuf, accent);
+    if (look.mix < 1) this.pass(field, this.atlas(look.from, geo), alpha * (1 - look.mix), ctx, geo, gain, orientBuf, accent);
+    this.pass(field, this.atlas(look.to, geo), alpha * (look.mix < 1 ? look.mix : 1), ctx, geo, gain, orientBuf, accent);
   }
 
   /**
    * Advances every layer's look, clears to the top layer's target palette ground, then paints
-   * layers bottom → top (ground layers first, typically dimmer via a small gain). `flash` 0..1
+   * layers bottom → top (ground layers first, an under-painting via a smaller gain and `alpha`). `flash` 0..1
    * washes the whole frame toward white, used for the drop release.
    */
   draw(layers, dt, flash = 0) {

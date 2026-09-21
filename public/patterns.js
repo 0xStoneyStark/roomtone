@@ -231,14 +231,21 @@ export function glitch(cols, rows, field) {
   };
 }
 
+const RIPPLE_IDLE_S = 1.6; // without hits, a soft ring falls on its own, like rain on a pond
+
 export function ripple(cols, rows, field, aspect) {
   let drops = [];
+  let lastDrop = -Infinity;
   const width = cols / REF_COLS;
   return {
     step(dt, t, live, p) {
       if (live.beat) {
         const central = live.bass > 0.6;
         drops.push({ x: central ? cols / 2 : Math.random() * cols, y: central ? rows / 2 : Math.random() * rows, t0: t, s: live.beat });
+        lastDrop = t;
+      } else if (t - lastDrop > RIPPLE_IDLE_S) {
+        drops.push({ x: Math.random() * cols, y: Math.random() * rows, t0: t, s: 0.35 + 0.3 * live.energy });
+        lastDrop = t;
       }
       drops = drops.filter((d) => t - d.t0 < 4).slice(-8); // faded rings cost as much as fresh ones
       const wave = 12 * (0.5 + p.speed) * width;

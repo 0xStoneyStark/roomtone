@@ -4,6 +4,8 @@
 //
 // Dark palettes ramp two-tone: darkest → mid in the mood's primary hue, mid → brightest drifting
 // toward a second hue (phosphor and bone stay single-hue, per their descriptions in questions.mjs).
+// The darkest stop sits at 40–48% lightness: most cells of a picture land in the lower half of the
+// ramp, and anything darker than that vanishes on the black ground (especially on a phone).
 // Paper palettes run the other way — level 0 is a faint ink tint just off the paper colour, level
 // 15 is full ink — so the renderer's "brighter field value → higher index" mapping still reads as
 // "more ink" instead of "more light".
@@ -14,21 +16,21 @@ export const LEVELS = 16;
 // plus a contrasting accent for the loudest marks and the canvas ground colour.
 const STOPS = {
   // Deep red through orange to pale gold, like coals.
-  ember: { stops: [[0, 80, 28], [18, 95, 50], [45, 100, 78]], accent: [190, 90, 60], bg: [6, 6, 7], paper: false },
+  ember: { stops: [[0, 80, 42], [18, 95, 58], [45, 100, 78]], accent: [190, 90, 60], bg: [6, 6, 7], paper: false },
   // Navy through cyan to a near-white with a hint of green.
-  glacier: { stops: [[225, 70, 34], [200, 90, 55], [170, 25, 95]], accent: [30, 100, 60], bg: [6, 6, 7], paper: false },
+  glacier: { stops: [[225, 70, 46], [200, 90, 62], [170, 25, 95]], accent: [30, 100, 60], bg: [6, 6, 7], paper: false },
   // Single-hue green, like an old terminal — no hue drift.
-  phosphor: { stops: [[130, 85, 28], [130, 90, 50], [130, 95, 82]], accent: [330, 100, 65], bg: [6, 6, 7], paper: false },
+  phosphor: { stops: [[130, 85, 40], [130, 90, 58], [130, 95, 82]], accent: [330, 100, 65], bg: [6, 6, 7], paper: false },
   // Indigo through magenta to hot pink.
-  violet: { stops: [[260, 70, 36], [300, 85, 55], [330, 100, 80]], accent: [60, 100, 60], bg: [6, 6, 7], paper: false },
+  violet: { stops: [[260, 70, 48], [300, 85, 62], [330, 100, 80]], accent: [60, 100, 60], bg: [6, 6, 7], paper: false },
   // Olive through chartreuse to lemon.
-  acid: { stops: [[70, 70, 30], [75, 100, 50], [58, 100, 82]], accent: [285, 100, 65], bg: [6, 6, 7], paper: false },
+  acid: { stops: [[70, 70, 42], [75, 100, 56], [58, 100, 82]], accent: [285, 100, 65], bg: [6, 6, 7], paper: false },
   // Plum through rose to peach.
-  dusk: { stops: [[290, 40, 32], [345, 60, 58], [25, 90, 82]], accent: [170, 80, 55], bg: [6, 6, 7], paper: false },
+  dusk: { stops: [[290, 45, 46], [345, 65, 64], [25, 90, 82]], accent: [170, 80, 55], bg: [6, 6, 7], paper: false },
   // Warm off-white and grey only, no colour drift.
-  bone: { stops: [[40, 12, 30], [40, 15, 58], [45, 25, 94]], accent: [10, 90, 60], bg: [6, 6, 7], paper: false },
+  bone: { stops: [[40, 12, 44], [40, 15, 66], [45, 25, 94]], accent: [10, 90, 60], bg: [6, 6, 7], paper: false },
   // Crimson and near-black only.
-  blood: { stops: [[350, 85, 28], [355, 95, 45], [0, 100, 66]], accent: [45, 100, 60], bg: [6, 6, 7], paper: false },
+  blood: { stops: [[350, 85, 40], [355, 95, 54], [0, 100, 66]], accent: [45, 100, 60], bg: [6, 6, 7], paper: false },
 
   // Blue-black ink on warm bone paper, like a print.
   ink: { stops: [[215, 15, 82], [220, 40, 50], [225, 60, 14]], accent: [12, 85, 45], bg: [239, 233, 220], paper: true },

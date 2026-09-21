@@ -25,19 +25,23 @@ const DROP_BEAT_MIN = 0.7;
 const DROP_ENERGY_JUMP = 1.5; // energy vs the last few seconds' average
 const DROP_BASELINE_MS = 4000;
 const DROP_COOLDOWN_MS = 10000;
-// Scenes end when Jev judges the music has turned, or after the hold the slider sets.
-const TURN_MIN = 0.65;
+// Scenes end when Jev judges the music has turned (twice running, to ride out one noisy answer),
+// or after the hold the slider sets.
+const TURN_MIN = 0.75;
+const TURN_STREAK = 2;
 const MIN_HOLD_MS = 8000;
+const BASELINE_SETTLE_MS = 3000; // the "sound at the picture" keeps updating this long, so a crossfade or intro is not the baseline
 const DEFAULT_HOLD_S = 45;
 const SILENCE_RETRY_MS = 500;
 const ROLL_SHARPNESS = 1.5; // 1 = roll straight from Jev's odds; higher favours its stronger options
 const STATUS_HZ = 4;
 // Jev's energy arc sets the overall brightness (quiet opening dim, peak bright); an armed
 // drop-soon adds a beat-synced shimmer so the prediction is visible before the hit lands.
-const ARC_GAIN_MIN = 0.7;
+const ARC_GAIN_MIN = 0.8;
 const ARC_GAIN_MAX = 1.2;
 const DROP_SHIMMER = 0.4;
-const GROUND_GAIN = 0.42; // the ground layer stays a dim under-painting
+const GROUND_GAIN = 0.6; // the ground layer stays an under-painting: thinner (gain) and translucent (alpha)
+const GROUND_ALPHA = 0.45;
 const ACCENT_SHARE = [0, 0.06, 0.25]; // share of the loudest marks in the accent colour, per Jev level
 const GOVERNOR_OFF = new URLSearchParams(location.search).has("nogov"); // for recordings, where capture throttles rAF
 // Quality governor: shrink the glyph grid when frames run long, never grow it back mid-session.
@@ -88,7 +92,8 @@ let resizeTimer = 0;
 let tasteInFlight = false;
 let nextTasteAt = 0;
 let lastSceneAt = 0;
-let sceneSound = null; // the description Jev saw when the current picture was chosen
+let sceneSound = null; // a pulse-window description from when the current picture was asked for
+let turnStreak = 0;
 let pulseRunning = false;
 let judgeCount = 0;
 let sessionTokens = 0;
@@ -210,6 +215,9 @@ async function judgeTaste() {
   tasteInFlight = true;
   ledger.say("Asking Jev for the next picture…", "wait");
   const holdMs = Number(holdInput.value) * 1000;
+  // The pulse loop later asks whether the music has turned since this moment, comparing like with
+  // like: a two-second description now against two-second descriptions then.
+  const soundNow = ear.describe(PULSE_WINDOW_S) ?? sound;
   try {
     // With the live loop off, the pulse questions ride along on this call instead.
     const body = await postJudge({ sound, set: liveInput.checked ? "taste" : "all", note: noteInput.value, local_time: localTime() });
@@ -218,7 +226,8 @@ async function judgeTaste() {
     applyTaste(body);
     if (body.answers.density) applyPulse(body);
     ledger.say("");
-    sceneSound = sound;
+    sceneSound = soundNow;
+    turnStreak = 0;
     lastSceneAt = performance.now();
     nextTasteAt = lastSceneAt + holdMs;
   } catch (err) {
@@ -278,6 +287,7 @@ async function pulseLoop() {
     try {
       applyPulse(await postJudge({ sound, set: "pulse", before: sceneSound ?? undefined }));
       pulseFailures = 0;
+      if (performance.now() - lastSceneAt < BASELINE_SETTLE_MS) sceneSound = sound;
     } catch (err) {
       pulseFailures += 1;
       const wait = err.status === 503 ? BUDGET_BACKOFF_MS : Math.min(MAX_BACKOFF_MS, PULSE_ERROR_BACKOFF_MS * 2 ** (pulseFailures - 1));
@@ -297,7 +307,8 @@ function applyPulse(body) {
   targets.arc = scoreUnit(answers.arc);
   params.drop = answers.drop_soon.noul;
   // The music turned: end the scene early, once the current picture has had a moment to be seen.
-  if (answers.turned && answers.turned.noul >= TURN_MIN && performance.now() - lastSceneAt >= MIN_HOLD_MS && !tasteInFlight) nextTasteAt = 0;
+  turnStreak = answers.turned && answers.turned.noul >= TURN_MIN ? turnStreak + 1 : 0;
+  if (turnStreak >= TURN_STREAK && performance.now() - lastSceneAt >= MIN_HOLD_MS && !tasteInFlight) nextTasteAt = 0;
   ledger.showPulse(body);
 }
 
@@ -365,7 +376,7 @@ function composeLayers(dt, t, live, frozen) {
   applyMask(figureField, mask, params.emptiness, masks.figure);
   applyMask(groundField, mask, params.emptiness * 0.6, masks.ground);
   return [
-    { field: masks.ground, look: groundLook, gain: lastGain * GROUND_GAIN, accent: 0 },
+    { field: masks.ground, look: groundLook, gain: lastGain * GROUND_GAIN, accent: 0, alpha: GROUND_ALPHA },
     { field: masks.figure, look: figureLook, gain: lastGain, accent: params.accent },
   ];
 }

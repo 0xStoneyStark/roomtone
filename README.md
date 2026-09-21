@@ -88,7 +88,7 @@ npm start
 ```
 
 Open <http://localhost:8790>, press **Start listening**, allow the microphone, and play music in
-the room. **Play the demo loop** runs a synthesised 128 BPM build-and-drop instead, no mic needed.
+the room. **Play the demo loop** runs two synthesised songs instead, no mic needed: a 128 BPM build-and-drop and a slow, airy piece at 84 BPM, changing over every 45 s so the "has the music turned" judgment has a turn to notice.
 
 ### On a phone
 
