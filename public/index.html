@@ -56,6 +56,7 @@
       <button id="start-demo" class="button button--quiet" type="button">Play the demo loop</button>
       <span class="intro__hint">no mic needed</span>
     </div>
+    <p class="intro__fine">Each start gives Jev 2½ minutes of listening; the picture keeps moving after that, and Start Jev again buys another 2½.</p>
     <p class="intro__message" data-intro-message></p>
   </section>
 
@@ -102,6 +103,11 @@
     </aside>
 
     <p class="hud__corner hud__corner--bl keys"><kbd>H</kbd> ledger <kbd>N</kbd> new picture <kbd>S</kbd> save frame</p>
+    <div id="rest" class="rest" hidden>
+      <p class="eyebrow rest__eyebrow">Jev is resting</p>
+      <p class="rest__body">Each start gives Jev 2½ minutes of listening. The picture keeps moving on its last odds; press the button and Jev starts deciding again.</p>
+      <button id="resume" class="button" type="button">Start Jev again</button>
+    </div>
     <button id="ledger-show" class="hud__corner hud__corner--br ledger-show button button--quiet button--small" type="button">Ledger</button>
   </div>
 

@@ -640,6 +640,36 @@ kbd {
   }
 }
 
+/* Jev resting: the per-start budget is spent ------------------------------ */
+
+.rest {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(46ch, calc(100vw - 2 * var(--gutter)));
+  padding: 22px 24px 24px;
+  background: rgba(5, 5, 7, 0.86);
+  box-shadow: inset 1px 0 0 var(--accent-70), inset 0 0 0 1px var(--ink-08);
+  clip-path: var(--cut);
+  pointer-events: auto;
+}
+
+.rest__eyebrow {
+  margin: 0 0 10px;
+  color: var(--accent-c);
+}
+
+.rest__body {
+  margin: 0 0 18px;
+  color: var(--ink-70);
+}
+
+.intro__fine {
+  margin: 14px 0 0;
+  color: var(--ink-45);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ledger,
   .button,
@@ -671,6 +701,10 @@ html[data-paper="1"] {
   --ink-08: rgba(28, 24, 18, 0.08);
   /* A shade darker than --bg, for surfaces that sit on top of the page. */
   --paper-surface: 226, 219, 203;
+}
+
+html[data-paper="1"] .rest {
+  background: rgba(var(--paper-surface), 0.92);
 }
 
 html[data-paper="1"] .ledger {

@@ -32,6 +32,10 @@ const TURN_STREAK = 2;
 const MIN_HOLD_MS = 8000;
 const BASELINE_SETTLE_MS = 3000; // the "sound at the picture" keeps updating this long, so a crossfade or intro is not the baseline
 const DEFAULT_HOLD_S = 45;
+// Jev listens this long per press of Start. The site is public, so every start bounds the spend;
+// the picture keeps moving afterwards, and another press starts Jev again.
+const SESSION_S = 150;
+const SESSION_LABEL = "2½ minutes";
 const SILENCE_RETRY_MS = 500;
 const ROLL_SHARPNESS = 1.5; // 1 = roll straight from Jev's odds; higher favours its stronger options
 const STATUS_HZ = 4;
@@ -73,6 +77,7 @@ const noteInput = document.getElementById("note");
 const holdInput = document.getElementById("cadence");
 const holdLabel = document.getElementById("cadence-label");
 const liveInput = document.getElementById("live");
+const restEl = document.getElementById("rest");
 const ear = new Ear();
 
 const figure = new Layer(PATTERNS, renderer.cols, renderer.rows, renderer.aspect, "embers");
@@ -94,6 +99,8 @@ let nextTasteAt = 0;
 let lastSceneAt = 0;
 let sceneSound = null; // a pulse-window description from when the current picture was asked for
 let turnStreak = 0;
+let sessionEndsAt = 0;
+let jevResting = false;
 let pulseRunning = false;
 let judgeCount = 0;
 let sessionTokens = 0;
@@ -205,7 +212,7 @@ async function postJudge(payload) {
 
 /** The scene: figure, ground, glyphs, colour, motion, placement, emptiness, accent. Rolled from Jev's odds. */
 async function judgeTaste() {
-  if (tasteInFlight) return;
+  if (tasteInFlight || jevResting) return;
   const sound = ear.describe(TASTE_WINDOW_S);
   if (!sound) {
     ledger.say("Nothing to hear yet — play something near the mic.", "wait");
@@ -277,7 +284,7 @@ function applyTaste(body) {
 async function pulseLoop() {
   if (pulseRunning) return;
   pulseRunning = true;
-  while (liveInput.checked) {
+  while (liveInput.checked && !jevResting) {
     const sound = document.hidden ? null : ear.describe(PULSE_WINDOW_S); // a background tab spends no tokens
     if (!sound) {
       await sleep(SILENCE_RETRY_MS);
@@ -452,14 +459,38 @@ function frame(now) {
   if (now >= nextStatusAt) {
     nextStatusAt = now + 1000 / STATUS_HZ;
     const mm = Math.floor(t / 60), ss = String(Math.floor(t % 60)).padStart(2, "0");
-    statusCells.state.textContent = live.silent ? "quiet" : "listening";
+    statusCells.state.textContent = jevResting ? "jev resting" : live.silent ? "quiet" : "listening";
     statusCells.time.textContent = `${mm}:${ss}`;
     statusCells.bpm.textContent = live.bpm ? `${live.bpm} bpm` : "no beat";
     statusCells.judgments.textContent = `${judgeCount} judgments`;
     statusCells.perf.textContent = `${Math.round(fps)} fps · ${workMs.toFixed(1)} ms · ${renderer.cols}×${renderer.rows}`;
   }
   govern(now);
+  if (!jevResting && now >= sessionEndsAt) restJev();
   if (now >= nextTasteAt) judgeTaste();
+}
+
+/** The per-start budget is spent: stop asking Jev, keep the picture moving, offer another start. */
+function restJev() {
+  jevResting = true;
+  restEl.hidden = false;
+  ledger.say(`Jev has listened for ${SESSION_LABEL} — press Start Jev again to keep going.`, "wait");
+}
+
+function resumeJev() {
+  if (!jevResting) return;
+  jevResting = false;
+  restEl.hidden = true;
+  ledger.say("");
+  sessionEndsAt = performance.now() + SESSION_S * 1000;
+  nextTasteAt = 0;
+  pulseLoop();
+}
+
+/** A new picture on request; while Jev rests, the request is the second start. */
+function askNow() {
+  if (jevResting) resumeJev();
+  else nextTasteAt = 0;
 }
 
 /** Before Start: embers drifting slowly behind the intro, driven by a gentle synthetic swell instead of audio. */
@@ -495,6 +526,7 @@ async function start(source) {
   lastSceneAt = startedAt;
   nextTasteAt = startedAt + 2500;
   nextGovernorAt = startedAt + 4000;
+  sessionEndsAt = startedAt + SESSION_S * 1000;
   requestAnimationFrame(frame);
   pulseLoop();
 }
@@ -509,9 +541,8 @@ document.fonts.ready.then(() => renderer.resize()).finally(() => {
 
 document.getElementById("start-mic").addEventListener("click", () => start(micSource));
 document.getElementById("start-demo").addEventListener("click", () => start(demoSource));
-document.getElementById("judge-now").addEventListener("click", () => {
-  nextTasteAt = 0;
-});
+document.getElementById("judge-now").addEventListener("click", askNow);
+document.getElementById("resume").addEventListener("click", resumeJev);
 document.getElementById("ledger-toggle").addEventListener("click", () => ledgerEl.classList.toggle("is-collapsed"));
 document.getElementById("ledger-head").addEventListener("click", (e) => {
   if (phoneLayout() && e.target.id !== "ledger-toggle") ledgerEl.classList.toggle("is-collapsed");
@@ -538,7 +569,7 @@ noteInput.addEventListener("keydown", (e) => {
   // Enter applies the note straight away: Jev re-judges with the new context.
   if (e.key === "Enter") {
     noteInput.blur();
-    nextTasteAt = 0;
+    askNow();
   }
 });
 window.addEventListener("keydown", (e) => {
@@ -548,6 +579,6 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "h" || e.key === "H") ledgerEl.classList.toggle("is-hidden");
-  if (e.key === "n" || e.key === "N") nextTasteAt = 0;
+  if (e.key === "n" || e.key === "N") askNow();
   if (e.key === "s" || e.key === "S") saveFrame();
 });

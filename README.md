@@ -115,6 +115,7 @@ per-request nonce), `nosniff`, `frame-ancestors 'none'` and a microphone-only Pe
 - **what's playing, or where are you?** — free text that goes into Jev's state with the audio description.
 - **H** hides the ledger, **N** asks Jev for a new picture right now.
 - **hold a picture at most** — 10–120 s; a new picture comes sooner when Jev judges the music has turned.
+- **Start Jev again** — each press of Start gives Jev 2½ minutes (`SESSION_S` in `app.js`). After that the picture keeps moving on its last odds and no calls are made until the button is pressed; on a public deployment this bounds the spend per visitor, alongside the server's per-IP rate limit and hourly token budget.
 - **live feel** — the continuous pulse loop (on by default).
 - **Save this frame** (or **S**) — the frame on screen as a PNG of the art alone (no HUD, no
   caption), re-rasterised at print resolution: the same glyph grid drawn at a much larger font size,
