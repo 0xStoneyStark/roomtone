@@ -1,0 +1,657 @@
+:root {
+  --bg: #050507;
+  --ink: #e6e1d6;
+  --ink-70: rgba(230, 225, 214, 0.7);
+  --ink-45: rgba(230, 225, 214, 0.45);
+  --ink-15: rgba(230, 225, 214, 0.15);
+  --ink-08: rgba(230, 225, 214, 0.08);
+  /* Set from JS to the mid tone of whatever palette Jev last chose. */
+  --accent: 150, 146, 138;
+  --accent-c: rgb(var(--accent));
+  --accent-70: rgba(var(--accent), 0.7);
+  --accent-35: rgba(var(--accent), 0.35);
+  --accent-12: rgba(var(--accent), 0.12);
+  --error: #ff7a5c;
+  --display: "Chakra Petch", "IBM Plex Mono", monospace;
+  --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
+  --gutter: 22px;
+  --notch: 10px;
+  --cut: polygon(var(--notch) 0, 100% 0, 100% calc(100% - var(--notch)), calc(100% - var(--notch)) 100%, 0 100%, 0 var(--notch));
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  display: block;
+  touch-action: none;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+.eyebrow {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+/* Corner brackets: the HUD frame. --------------------------------------- */
+
+.frame {
+  position: fixed;
+  inset: calc(var(--gutter) - 8px);
+  pointer-events: none;
+  transition: color 1.5s var(--ease);
+  color: var(--accent-70);
+}
+
+.frame::before,
+.frame::after,
+.frame i::before,
+.frame i::after {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border: 0 solid currentColor;
+}
+
+.frame::before { top: 0; left: 0; border-width: 1px 0 0 1px; }
+.frame::after { top: 0; right: 0; border-width: 1px 1px 0 0; }
+.frame i::before { bottom: 0; left: 0; border-width: 0 0 1px 1px; }
+.frame i::after { bottom: 0; right: 0; border-width: 0 1px 1px 0; }
+
+/* Intro ------------------------------------------------------------------ */
+
+.intro {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  padding: 0 var(--gutter);
+  max-width: 64ch;
+  margin: 0 auto;
+}
+
+.intro__eyebrow {
+  margin: 0 0 26px;
+  color: var(--ink-45);
+}
+
+.intro__title {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: clamp(46px, 9vw, 104px);
+  letter-spacing: 0.2em;
+  line-height: 1;
+  text-shadow: 0 0 40px var(--accent-35);
+}
+
+.intro__rule {
+  width: 72px;
+  height: 1px;
+  margin: 22px 0 0;
+  background: var(--accent-c);
+  transform-origin: left;
+  animation: rule-in 900ms var(--ease) both;
+}
+
+.intro__lede {
+  margin: 18px 0 0;
+  font-size: 15px;
+}
+
+.intro__body {
+  margin: 18px 0 0;
+  color: var(--ink-70);
+  max-width: 58ch;
+}
+
+.intro__actions {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px 16px;
+  align-items: center;
+  margin-top: 38px;
+}
+
+.intro__hint {
+  color: var(--ink-45);
+}
+
+.intro__message {
+  margin: 18px 0 0;
+  color: var(--error);
+  min-height: 1.5em;
+}
+
+/* Buttons ---------------------------------------------------------------- */
+
+.button {
+  position: relative;
+  font-family: var(--display);
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 12px;
+  background: var(--ink);
+  color: var(--bg);
+  border: 0;
+  padding: 12px 20px;
+  cursor: pointer;
+  clip-path: var(--cut);
+  transition: background 150ms ease, color 150ms ease, transform 150ms var(--ease);
+}
+
+.button:hover {
+  background: #fff;
+}
+
+.button:active {
+  transform: translateY(1px);
+}
+
+.button--quiet {
+  background: var(--ink-08);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink-15);
+}
+
+.button--quiet:hover {
+  background: var(--accent-12);
+  box-shadow: inset 0 0 0 1px var(--accent-70);
+  color: var(--ink);
+}
+
+.button--small {
+  padding: 8px 14px;
+  font-size: 11px;
+}
+
+.button:focus-visible,
+.note__input:focus-visible,
+.cadence input:focus-visible,
+.ledger__button:focus-visible {
+  outline: 1px solid var(--accent-c);
+  outline-offset: 3px;
+}
+
+/* HUD -------------------------------------------------------------------- */
+
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud__corner {
+  position: absolute;
+  pointer-events: auto;
+}
+
+.hud__corner--tl {
+  top: var(--gutter);
+  left: var(--gutter);
+  max-width: 44ch;
+}
+
+.hud__corner--bl {
+  bottom: var(--gutter);
+  left: var(--gutter);
+  margin: 0;
+  color: var(--ink-45);
+}
+
+.hud__corner--br {
+  bottom: var(--gutter);
+  right: var(--gutter);
+}
+
+kbd {
+  font: inherit;
+  color: var(--ink);
+  border: 1px solid var(--ink-15);
+  padding: 0 6px;
+  margin-right: 2px;
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.status span {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-70);
+  padding: 4px 8px;
+  border: 1px solid var(--ink-15);
+  background: rgba(5, 5, 7, 0.55);
+  white-space: nowrap;
+}
+
+.status span[data-k="state"] {
+  color: var(--accent-c);
+  border-color: var(--accent-35);
+}
+
+.note {
+  display: block;
+  margin-top: 16px;
+}
+
+.note__label {
+  display: block;
+  color: var(--ink-45);
+}
+
+.note__input {
+  width: 40ch;
+  max-width: 100%;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--ink-15);
+  padding: 5px 0;
+  color: var(--ink);
+  transition: border-color 200ms ease;
+}
+
+.note__input::placeholder {
+  color: var(--ink-45);
+}
+
+.note__input:focus {
+  border-bottom-color: var(--accent-c);
+  outline: none;
+}
+
+.save-frame {
+  margin-top: 16px;
+}
+
+.ledger-show {
+  display: none;
+}
+
+.ledger.is-hidden ~ .ledger-show {
+  display: block;
+}
+
+/* Ledger ----------------------------------------------------------------- */
+
+.ledger {
+  position: absolute;
+  top: var(--gutter);
+  right: var(--gutter);
+  width: min(74ch, calc(100vw - 2 * var(--gutter)));
+  pointer-events: auto;
+  /* Solid, not backdrop-filter: a blur over a canvas that changes every frame is re-rendered every frame. */
+  background: rgba(5, 5, 7, 0.86);
+  box-shadow: inset 1px 0 0 var(--accent-70), inset 0 0 0 1px var(--ink-08);
+  clip-path: var(--cut);
+  padding: 14px 16px 12px 18px;
+  transition: opacity 200ms ease, transform 200ms ease, box-shadow 1.5s var(--ease);
+}
+
+.ledger.is-hidden {
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+}
+
+.ledger.is-collapsed > :not(.ledger__head) {
+  display: none;
+}
+
+.ledger__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-45);
+}
+
+.ledger__title {
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.led {
+  width: 7px;
+  height: 7px;
+  background: var(--accent-c);
+  box-shadow: 0 0 10px var(--accent-70);
+  flex: none;
+  transition: background 1.5s var(--ease), box-shadow 1.5s var(--ease);
+}
+
+.ledger.is-busy .led {
+  animation: led-pulse 700ms ease-in-out infinite;
+}
+
+.ledger__meta {
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 400;
+  font-size: 11px;
+}
+
+.ledger__button {
+  background: transparent;
+  border: 0;
+  color: var(--ink-70);
+  cursor: pointer;
+  padding: 2px 6px;
+  line-height: 1;
+  transition: transform 200ms var(--ease);
+}
+
+.ledger.is-collapsed .ledger__button {
+  transform: rotate(180deg);
+}
+
+.ledger__message {
+  margin: 8px 0 0;
+}
+
+.ledger__message:empty {
+  display: none;
+}
+
+.ledger__message[data-kind="error"] {
+  color: var(--error);
+}
+
+.ledger__message[data-kind="wait"] {
+  color: var(--ink-45);
+}
+
+.ledger__heard {
+  margin: 10px 0 0;
+  color: var(--ink-70);
+}
+
+.ledger__note {
+  margin: 2px 0 0;
+  color: var(--accent-c);
+}
+
+.ledger__note:empty,
+.ledger__heard:empty,
+.ledger__rows:empty,
+.ledger__now:empty {
+  display: none;
+}
+
+.ledger__rows {
+  margin-top: 10px;
+  border-top: 1px solid var(--ink-15);
+  padding-top: 8px;
+}
+
+.ledger__now {
+  margin: 10px 0 0;
+  color: var(--ink-45);
+}
+
+.ledger__rows--pulse {
+  margin-top: 4px;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 11ch 12ch 11ch 5ch 1fr;
+  gap: 0 8px;
+  align-items: center;
+  color: var(--ink-45);
+  white-space: nowrap;
+  animation: rise 320ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+.row--picked {
+  color: var(--ink);
+}
+
+.row__label {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-70);
+}
+
+.row__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row--picked .row__name {
+  color: var(--accent-c);
+  text-shadow: 0 0 12px var(--accent-35);
+}
+
+.row__pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.row__mark {
+  color: var(--ink-70);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row--picked .row__mark::before {
+  content: "◆ ";
+  color: var(--accent-c);
+}
+
+/* Segmented meters: a track of ten cells, filled to --p. */
+.meter {
+  position: relative;
+  display: block;
+  height: 8px;
+  --cells: 10;
+  --gap: 2px;
+  --seg: calc(100% / var(--cells));
+  background: repeating-linear-gradient(90deg, var(--ink-15) 0 calc(var(--seg) - var(--gap)), transparent calc(var(--seg) - var(--gap)) var(--seg));
+}
+
+.meter i {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(90deg, var(--accent-c) 0 calc(var(--seg) - var(--gap)), transparent calc(var(--seg) - var(--gap)) var(--seg));
+  clip-path: inset(0 calc(100% - var(--p) * 100%) 0 0);
+  transition: clip-path 350ms var(--ease), background 1.5s var(--ease);
+  opacity: 0.55;
+}
+
+.row--picked .meter i,
+.ledger__rows--pulse .meter i {
+  opacity: 1;
+}
+
+.meter--5 {
+  --cells: 5;
+}
+
+.ledger__foot {
+  margin-top: 12px;
+  border-top: 1px solid var(--ink-15);
+  padding-top: 10px;
+  color: var(--ink-45);
+}
+
+.cadence {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.cadence input {
+  flex: 1;
+  accent-color: var(--accent-c);
+  height: 2px;
+}
+
+.live {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 8px;
+  cursor: pointer;
+}
+
+.live input {
+  accent-color: var(--accent-c);
+  margin: 0;
+}
+
+.ledger__actions {
+  margin-top: 12px;
+}
+
+.ledger__fine {
+  margin: 8px 0 0;
+  color: var(--ink-45);
+  font-size: 11px;
+}
+
+/* Motion ----------------------------------------------------------------- */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes rule-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes led-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Phones ----------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  :root {
+    --gutter: 14px;
+  }
+
+  body {
+    font-size: 11px;
+  }
+
+  .ledger {
+    top: auto;
+    bottom: calc(var(--gutter) + env(safe-area-inset-bottom));
+    right: var(--gutter);
+    left: var(--gutter);
+    width: auto;
+    max-height: 60vh;
+    overflow: auto;
+  }
+
+  .ledger__head {
+    cursor: pointer;
+  }
+
+  .row {
+    grid-template-columns: 8ch 9ch 11ch 4ch 1fr;
+    gap: 0 6px;
+  }
+
+  .hud__corner--tl {
+    max-width: calc(100vw - 2 * var(--gutter));
+  }
+
+  .note__input {
+    width: 100%;
+  }
+
+  .keys {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .keys {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ledger,
+  .button,
+  .meter i,
+  .frame,
+  .led {
+    transition: none;
+  }
+
+  .row,
+  .intro__rule,
+  .ledger.is-busy .led {
+    animation: none;
+  }
+}

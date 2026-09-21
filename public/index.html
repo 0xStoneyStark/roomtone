@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#050507" />
+  <title>Roomtone</title>
+  <meta name="description" content="ASCII pictures art-directed by Jev from the music around you." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css?v=__V__" />
+  <script type="importmap">
+    {
+      "imports": {
+        "./audio.js": "./audio.js?v=__V__",
+        "./demo-source.js": "./demo-source.js?v=__V__",
+        "./ledger.js": "./ledger.js?v=__V__",
+        "./patterns.js": "./patterns.js?v=__V__",
+        "./render.js": "./render.js?v=__V__"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="stage" aria-hidden="true"></canvas>
+  <div class="frame" aria-hidden="true"><i></i></div>
+
+  <section id="intro" class="intro" aria-labelledby="intro-title">
+    <p class="intro__eyebrow eyebrow">jev-1.13 · microphone · canvas</p>
+    <h1 id="intro-title" class="intro__title">ROOMTONE</h1>
+    <div class="intro__rule" aria-hidden="true"></div>
+    <p class="intro__lede">ASCII pictures, art-directed by Jev from the music around you.</p>
+    <p class="intro__body">
+      Not a waveform. Every few seconds the last six seconds of sound are put into words — tempo, weight,
+      brightness, rhythm — and Jev, a decision model, answers eight questions about them: which picture,
+      which glyphs, which colours, how it should move. The next picture is rolled from Jev's own
+      probabilities, so the same song never plays the same way twice.
+    </p>
+    <div class="intro__actions">
+      <button id="start-mic" class="button" type="button">Start listening</button>
+      <span class="intro__hint">uses your microphone</span>
+      <button id="start-demo" class="button button--quiet" type="button">Play the demo loop</button>
+      <span class="intro__hint">no mic needed</span>
+    </div>
+    <p class="intro__message" data-intro-message></p>
+  </section>
+
+  <div id="hud" class="hud" hidden>
+    <div class="hud__corner hud__corner--tl">
+      <p id="status" class="status" aria-live="off">
+        <span data-k="state">listening</span><span data-k="time">0:00</span><span data-k="bpm">no beat</span><span data-k="judgments">0 judgments</span><span data-k="perf">— fps</span>
+      </p>
+      <label class="note">
+        <span class="note__label">what's playing, or where are you?</span>
+        <input id="note" class="note__input" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="e.g. Radiohead, rain outside" />
+      </label>
+      <button id="save-frame" class="button button--quiet button--small save-frame" type="button">Save this frame</button>
+    </div>
+
+    <aside id="ledger" class="ledger" aria-live="polite" aria-label="Jev's judgments">
+      <header class="ledger__head" id="ledger-head">
+        <i class="led" aria-hidden="true"></i>
+        <span class="ledger__title eyebrow">Jev heard</span>
+        <span class="ledger__meta" data-meta>waiting for the first six seconds</span>
+        <button id="ledger-toggle" class="ledger__button" type="button" aria-label="Collapse or expand the ledger">▾</button>
+      </header>
+      <p class="ledger__message" data-message data-kind=""></p>
+      <p class="ledger__heard" data-heard></p>
+      <p class="ledger__note" data-note></p>
+      <div class="ledger__rows" data-taste></div>
+      <p class="ledger__now" data-now></p>
+      <div class="ledger__rows ledger__rows--pulse" data-pulse></div>
+      <footer class="ledger__foot">
+        <label class="cadence">
+          <span>new picture every</span>
+          <input id="cadence" type="range" min="3" max="20" step="1" />
+          <span id="cadence-label">6 s</span>
+        </label>
+        <label class="live">
+          <input id="live" type="checkbox" checked />
+          <span>live feel — fill, order, arc and drop-soon re-asked as fast as Jev answers (≈2/s)</span>
+        </label>
+        <div class="ledger__actions">
+          <button id="judge-now" class="button button--quiet button--small" type="button">New picture now</button>
+        </div>
+        <p class="ledger__fine">meters are Jev's odds; each roll favours the stronger ones</p>
+      </footer>
+    </aside>
+
+    <p class="hud__corner hud__corner--bl keys"><kbd>H</kbd> ledger <kbd>N</kbd> new picture <kbd>S</kbd> save frame</p>
+    <button id="ledger-show" class="hud__corner hud__corner--br ledger-show button button--quiet button--small" type="button">Ledger</button>
+  </div>
+
+  <script type="module" src="app.js?v=__V__"></script>
+</body>
+</html>

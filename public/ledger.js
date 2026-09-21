@@ -1,0 +1,120 @@
+// The art director's ledger: what the mic said, what Jev answered, and which
+// option the dice landed on. Taste rows are rebuilt per scene; pulse rows are
+// updated in place because they change a couple of times a second. Built with
+// DOM nodes (no innerHTML) because the listener's note is user text.
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** A segmented meter: ten cells (or five for scores), filled to `fraction` via a CSS variable. */
+function meter(cells = 10) {
+  const node = el("span", "meter" + (cells === 5 ? " meter--5" : ""));
+  node.append(el("i"));
+  return node;
+}
+
+function fill(meterNode, fraction) {
+  meterNode.style.setProperty("--p", Math.max(0, Math.min(1, fraction)).toFixed(3));
+}
+
+function topOptions(probabilities, n) {
+  return Object.entries(probabilities).sort((a, b) => b[1] - a[1]).slice(0, n);
+}
+
+function row(label, picked = false, cellsInMeter = 10, index = 0) {
+  const node = el("div", "row" + (picked ? " row--picked" : ""));
+  node.style.setProperty("--i", index);
+  const cells = {
+    label: el("span", "row__label", label),
+    name: el("span", "row__name"),
+    bar: meter(cellsInMeter),
+    pct: el("span", "row__pct"),
+    mark: el("span", "row__mark"),
+  };
+  node.append(...Object.values(cells));
+  return { node, cells };
+}
+
+export class Ledger {
+  constructor(root) {
+    this.root = root;
+    this.heard = root.querySelector("[data-heard]");
+    this.now = root.querySelector("[data-now]");
+    this.tasteRows = root.querySelector("[data-taste]");
+    this.pulseRows = root.querySelector("[data-pulse]");
+    this.metaLine = root.querySelector("[data-meta]");
+    this.note = root.querySelector("[data-note]");
+    this.message = root.querySelector("[data-message]");
+    this.pulse = null; // live rows, created on the first pulse answer
+  }
+
+  /** A line of direction at the top of the ledger: waiting, error, or nothing. */
+  say(text, kind = "info") {
+    this.message.textContent = text ?? "";
+    this.message.dataset.kind = text ? kind : "";
+    this.root.classList.toggle("is-busy", Boolean(text) && kind === "wait");
+  }
+
+  meta(model, ms, sessionTokens) {
+    this.metaLine.textContent = `${model} · ${ms} ms · ${(sessionTokens / 1000).toFixed(1)}k tokens this session`;
+  }
+
+  showTaste({ state, answers, rolled, replayed }) {
+    this.heard.textContent = (replayed ? "(replay) " : "") + Object.values(state.sound).join(" · ");
+    this.note.textContent = state.listener_note === "(none)" ? "" : `you said: ${state.listener_note}`;
+    this.tasteRows.replaceChildren();
+    this.rowIndex = 0;
+    this.choiceRows("picture", answers.pattern, rolled.pattern, 3);
+    this.choiceRows("glyphs", answers.glyphs, rolled.glyphs, 2);
+    this.choiceRows("colour", answers.palette, rolled.palette, 2);
+    this.choiceRows("motion", answers.motion, rolled.motion, 2);
+  }
+
+  showPulse({ state, answers }) {
+    this.now.textContent = `now · ${Object.values(state.sound).join(" · ")}`;
+    if (!this.pulse) {
+      this.pulse = {
+        density: row("fill", false, 5),
+        turbulence: row("order", false, 5),
+        arc: row("arc", false, 5),
+        drop_soon: row("drop", false, 5),
+      };
+      this.pulseRows.replaceChildren(...Object.values(this.pulse).map((r) => r.node));
+    }
+    this.scoreRow(this.pulse.density, answers.density);
+    this.scoreRow(this.pulse.turbulence, answers.turbulence);
+    this.scoreRow(this.pulse.arc, answers.arc);
+    this.noulRow(this.pulse.drop_soon, answers.drop_soon);
+  }
+
+  choiceRows(label, answer, picked, count) {
+    const options = topOptions(answer.probabilities, count);
+    if (!options.some(([name]) => name === picked)) options.push([picked, answer.probabilities[picked]]);
+    const wasFavourite = picked === answer.choice;
+    options.forEach(([name, p], i) => {
+      const r = row(i === 0 ? label : "", name === picked, 10, this.rowIndex++);
+      r.cells.name.textContent = name;
+      fill(r.cells.bar, p);
+      r.cells.pct.textContent = String(Math.round(p * 100)).padStart(3);
+      r.cells.mark.textContent = name === picked ? (wasFavourite ? "rolled" : "rolled the long shot") : "";
+      this.tasteRows.append(r.node);
+    });
+  }
+
+  scoreRow(r, answer) {
+    const levels = Object.keys(answer.legend).length;
+    r.cells.name.textContent = answer.legend[String(Math.round(answer.score))].split(":")[0].toLowerCase();
+    fill(r.cells.bar, answer.score / (levels - 1));
+    r.cells.pct.textContent = `${answer.score.toFixed(1)}/${levels - 1}`;
+  }
+
+  noulRow(r, answer) {
+    r.cells.name.textContent = answer.noul >= 0.5 ? "likely" : "unlikely";
+    fill(r.cells.bar, answer.noul);
+    r.cells.pct.textContent = answer.noul.toFixed(2);
+  }
+}

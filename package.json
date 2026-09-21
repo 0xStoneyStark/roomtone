@@ -1,0 +1,18 @@
+{
+  "name": "roomtone",
+  "version": "0.1.0",
+  "description": "ASCII patterns art-directed by Jev (TypeSafe) from the music around you",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20.12"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test",
+    "cert": "node scripts/make-cert.mjs"
+  },
+  "dependencies": {
+    "@typesafe-ai/sdk": "^0.6.0"
+  }
+}
