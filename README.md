@@ -23,8 +23,8 @@ along on the taste call instead):
 | --- | --- | --- |
 | fill | Score, 5 levels | how much of the screen carries characters |
 | order | Score, 5 levels | clockwork → chaotic |
-| arc | Score, 4 levels | quiet opening → steady groove → building → peak |
-| drop soon | Noul | probability a drop is imminent; a confirmed hard hit then releases a flash and a re-roll |
+| arc | Score, 4 levels | quiet opening → steady groove → building → peak; sets the overall brightness |
+| drop soon | Noul | probability a drop is imminent; above 0.4 the picture shimmers on each beat, and a confirmed hard hit releases a flash and a re-roll |
 
 The next picture is **rolled from Jev's own probability distributions**, so the same song never
 plays the same way twice, but every roll is weighted by what Jev thinks fits. Type what's playing
@@ -69,7 +69,9 @@ website*). The ledger starts collapsed on phones — tap ▴ to open it; **New p
 footer. The glyph grid starts smaller on phones and shrinks further on its own if frames run long.
 
 The key is read on the server (`TYPESAFE_API_KEY`) and never sent to the browser; the browser
-only posts word-descriptions of the sound to `/api/judge`, which owns the question set.
+only posts word-descriptions of the sound to `/api/judge`, which owns the question set. Every
+response carries a Content-Security-Policy (own origin plus Google Fonts; the import map gets a
+per-request nonce), `nosniff`, `frame-ancestors 'none'` and a microphone-only Permissions-Policy.
 
 ## Controls
 
@@ -77,9 +79,10 @@ only posts word-descriptions of the sound to `/api/judge`, which owns the questi
 - **H** hides the ledger, **N** asks Jev for a new picture right now.
 - **new picture every** — taste cadence, 3–20 s.
 - **live feel** — the continuous pulse loop (on by default).
-- **Save this frame** (or **S**) — downloads the frame on screen as a PNG of the art alone (no HUD,
-  no caption), re-rasterised at print resolution: the same glyph grid drawn at a much larger font size,
-  up to 16 megapixels (the size is in the filename).
+- **Save this frame** (or **S**) — the frame on screen as a PNG of the art alone (no HUD, no
+  caption), re-rasterised at print resolution: the same glyph grid drawn at a much larger font size,
+  up to 16 megapixels (the size is in the filename). On phones it opens the share sheet ("Save Image").
+- **Enter** in the note field applies it immediately: Jev re-judges with the new context.
 - The status line top-left shows `fps · ms · cols×rows`: frames per second, CPU time spent per frame,
   and the glyph grid. If fps is low while ms is small, the browser itself is the bottleneck (check
   `chrome://gpu` for hardware acceleration, or a power-saving mode); if ms is high the quality
@@ -88,7 +91,8 @@ only posts word-descriptions of the sound to `/api/judge`, which owns the questi
 ## Tuning
 
 - `questions.mjs` — the art director's brief. Option descriptions are what Jev matches against; edit them to change its taste.
-- `public/audio.js` — the word buckets (what counts as "loud", "heavy bass", "fast"). Jev reads words far better than numbers, so all thresholds live here in code.
+- `public/audio.js` — the word buckets (what counts as "loud", "heavy bass", "fast"). Jev reads words far better than numbers, so all thresholds live here in code. Loudness is described both absolutely and relative to the loudest the session has heard, so mic gain drops out; the tempo estimate carries a log-Gaussian prior around 120 BPM against half/double/3:2 errors.
+- `test/options.test.mjs` (`npm test`) — checks every option Jev can choose has a generator, glyph ramp, palette or motion behind it.
 - `public/app.js` — `ROLL_SHARPNESS` (1 = roll straight from Jev's odds; 1.5 default favours its stronger options), `PULSE_WINDOW_S` / `PULSE_MIN_GAP_MS` for the live loop, drop-release thresholds, crossfade time.
 - `public/render.js` — `MAX_CELLS` (7000) caps the glyph budget; `app.js` starts every device at 5500 and the font size adapts to the window to stay under it (`MIN_FONT_PX` 8 is what limits small phones); the governor steps down on slow devices. `LOOK_FADE_S` is the glyph + palette crossfade.
 - `public/style.css` — the HUD's `--accent` is set from JS to the mid tone of whatever palette Jev last chose, so the chrome recolours with the art. Chakra Petch for titles/labels, IBM Plex Mono for data.

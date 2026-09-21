@@ -48,12 +48,17 @@ function beatsPerSecond(live) {
   return live.bpm ? live.bpm / 60 : 2;
 }
 
+/** Grids range from ~60 columns on a phone to 160+ on a wide screen; spawn rates and wavelengths follow. */
+const REF_COLS = 80;
+const REF_CELLS = 5000;
+
 export function rain(cols, rows, field) {
   const drops = [];
+  const width = cols / REF_COLS;
   return {
     step(dt, t, live, p) {
       decay(field, dt, 3 + 4 * p.turbulence);
-      const spawn = (0.4 + 6 * p.density) * dt + live.beat * 4;
+      const spawn = ((0.4 + 6 * p.density) * dt + live.beat * 4) * width;
       for (let n = spawn; n > 0; n -= 1) {
         if (Math.random() < n) drops.push({ x: Math.floor(Math.random() * cols), y: -1, v: 0.6 + Math.random() * (0.4 + p.turbulence) });
       }
@@ -110,10 +115,11 @@ export function life(cols, rows, field) {
 
 export function flow(cols, rows, field, aspect) {
   const parts = [];
+  const area = (cols * rows) / REF_CELLS;
   return {
     step(dt, t, live, p) {
       decay(field, dt, 2.5);
-      const want = Math.round(150 + 2200 * p.density);
+      const want = Math.round((150 + 2200 * p.density) * area);
       while (parts.length < want) parts.push({ x: Math.random() * cols, y: Math.random() * rows });
       parts.length = want;
       const scale = 0.02 + 0.05 * p.turbulence;
@@ -132,9 +138,10 @@ export function flow(cols, rows, field, aspect) {
 
 export function plasma(cols, rows, field, aspect) {
   const cx = cols / 2, cy = rows / 2;
+  const width = cols / REF_COLS;
   return {
     step(dt, t, live, p) {
-      const f = 0.05 + 0.2 * p.turbulence;
+      const f = (0.05 + 0.2 * p.turbulence) / width;
       const ts = t * (0.3 + 1.5 * p.speed);
       const k = 1 + 0.7 * live.bass;
       for (let y = 0; y < rows; y++) {
@@ -226,6 +233,7 @@ export function glitch(cols, rows, field) {
 
 export function ripple(cols, rows, field, aspect) {
   let drops = [];
+  const width = cols / REF_COLS;
   return {
     step(dt, t, live, p) {
       if (live.beat) {
@@ -233,9 +241,9 @@ export function ripple(cols, rows, field, aspect) {
         drops.push({ x: central ? cols / 2 : Math.random() * cols, y: central ? rows / 2 : Math.random() * rows, t0: t, s: live.beat });
       }
       drops = drops.filter((d) => t - d.t0 < 4).slice(-8); // faded rings cost as much as fresh ones
-      const wave = 12 * (0.5 + p.speed);
+      const wave = 12 * (0.5 + p.speed) * width;
       const base = 0.12 * p.density;
-      const k = 0.5 + 0.6 * p.turbulence;
+      const k = (0.5 + 0.6 * p.turbulence) / width;
       for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
         let v = base * noise(x * 0.1, y * 0.2, t * 0.3);
         for (const d of drops) {
@@ -245,7 +253,7 @@ export function ripple(cols, rows, field, aspect) {
           if (dx > reach || dx < -reach || dy > reach || dy < -reach) continue;
           const dist = Math.hypot(dx, dy);
           if (dist > reach) continue;
-          v += d.s * Math.max(0, Math.sin(dist * k - age * wave * 0.5)) * Math.exp(-dist * 0.06 - age * 0.8);
+          v += d.s * Math.max(0, Math.sin(dist * k - age * wave * 0.5)) * Math.exp(-dist * 0.06 / width - age * 0.8);
         }
         field[y * cols + x] = clamp01(v);
       }
@@ -255,10 +263,11 @@ export function ripple(cols, rows, field, aspect) {
 
 export function embers(cols, rows, field) {
   const sparks = [];
+  const width = cols / REF_COLS;
   return {
     step(dt, t, live, p) {
       decay(field, dt, 2.5);
-      const spawn = (4 + 45 * p.density) * dt + live.beat * 10;
+      const spawn = ((4 + 45 * p.density) * dt + live.beat * 10) * width;
       for (let n = spawn; n > 0; n -= 1) {
         if (Math.random() < n) sparks.push({ x: Math.random() * cols, y: rows - 1, vx: (Math.random() - 0.5) * 2, vy: -(2 + Math.random() * 6), heat: 1 });
       }

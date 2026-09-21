@@ -28,6 +28,12 @@ const DEFAULT_CADENCE_S = 6;
 const SILENCE_RETRY_MS = 500;
 const ROLL_SHARPNESS = 1.5; // 1 = roll straight from Jev's odds; higher favours its stronger options
 const STATUS_HZ = 4;
+// Jev's energy arc sets the overall brightness (quiet opening dim, peak bright); an armed
+// drop-soon adds a beat-synced shimmer so the prediction is visible before the hit lands.
+const ARC_GAIN_MIN = 0.7;
+const ARC_GAIN_MAX = 1.2;
+const DROP_SHIMMER = 0.4;
+const GOVERNOR_OFF = new URLSearchParams(location.search).has("nogov"); // for recordings, where capture throttles rAF
 // Quality governor: shrink the glyph grid when frames run long, never grow it back mid-session.
 const GOVERNOR_INTERVAL_MS = 1500;
 const GOVERNOR_WORK_MS = 9; // CPU time per frame we are willing to spend
@@ -37,7 +43,8 @@ const GOVERNOR_SHRINK = 0.7;
 const GOVERNOR_MIN_CELLS = 1200;
 const RESIZE_DEBOUNCE_MS = 250;
 
-const isPhone = matchMedia("(pointer: coarse)").matches || Math.min(innerWidth, innerHeight) < 600;
+// Same breakpoint as the stylesheet's phone layout, checked when it matters rather than at load.
+const phoneLayout = () => matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 720px)").matches;
 const params = { density: 0.35, turbulence: 0.35, arc: 0.3, drop: 0, speed: 0.5 };
 const targets = { density: 0.35, turbulence: 0.35, arc: 0.3 };
 const motions = { from: "drift", to: "drift", mix: 1 }; // blended over CROSSFADE_S so speed never jumps
@@ -78,6 +85,7 @@ let energyTrail = [];
 let lastReleaseAt = -Infinity;
 let idle = true; // before Start: a quiet picture plays behind the intro with no audio
 let lastField = null; // the field drawn in the most recent frame, for exports
+let lastGain = 1;
 let lastTaste = null; // Jev's most recent scene answers, re-rolled while Jev is unreachable
 let tasteFailures = 0;
 let pulseFailures = 0;
@@ -320,27 +328,40 @@ function stepPatterns(dt, t, live, frozen) {
   return blend;
 }
 
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
 /** Download the frame on screen right now as a high-resolution PNG of the art alone. */
 function saveFrame() {
   if (!lastField) return;
   const when = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const stamp = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}-${pad(when.getHours())}${pad(when.getMinutes())}${pad(when.getSeconds())}`;
-  const out = renderer.exportFrame(lastField);
-  out.toBlob((blob) => {
+  const out = renderer.exportFrame(lastField, lastGain);
+  out.toBlob(async (blob) => {
     if (!blob) {
       ledger.say("Could not export the frame (canvas too large for this browser).", "error");
       return;
     }
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `roomtone-${stamp}-${out.width}x${out.height}.png`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    const name = `roomtone-${stamp}-${out.width}x${out.height}.png`;
+    // Phones: the share sheet ("Save Image") is far more reliable than a download link for a blob.
+    const file = new File([blob], name, { type: "image/png" });
+    if (phoneLayout() && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: "Roomtone" });
+        return;
+      } catch (err) {
+        if (err.name === "AbortError") return; // the user closed the sheet
+      }
+    }
+    downloadBlob(blob, name);
   }, "image/png");
 }
-
-const GOVERNOR_OFF = new URLSearchParams(location.search).has("nogov"); // for recordings, where capture throttles rAF
 
 function govern(now) {
   if (GOVERNOR_OFF || now < nextGovernorAt) return;
@@ -370,7 +391,9 @@ function frame(now) {
 
   checkDropRelease(live, now);
   flash *= Math.exp(-dt * FLASH_DECAY);
-  renderer.draw(field, dt, flash);
+  const charge = Math.max(0, Math.min(1, (params.drop - 0.4) / 0.4));
+  lastGain = ARC_GAIN_MIN + (ARC_GAIN_MAX - ARC_GAIN_MIN) * params.arc + DROP_SHIMMER * charge * beatEnv;
+  renderer.draw(field, dt, flash, lastGain);
   lastField = field;
   workMs += (performance.now() - work0 - workMs) * 0.05;
 
@@ -412,7 +435,7 @@ async function start(source) {
   idle = false;
   intro.hidden = true;
   document.getElementById("hud").hidden = false;
-  if (isPhone) ledgerEl.classList.add("is-collapsed");
+  if (phoneLayout()) ledgerEl.classList.add("is-collapsed");
   const health = await fetch("/api/health").then((r) => r.json()).catch(() => ({ hasKey: false }));
   if (!health.hasKey) ledger.say("TYPESAFE_API_KEY is not set on the server. Add it to .env and restart.", "error");
   blend = new Float32Array(renderer.cols * renderer.rows);
@@ -441,7 +464,7 @@ document.getElementById("judge-now").addEventListener("click", () => {
 });
 document.getElementById("ledger-toggle").addEventListener("click", () => ledgerEl.classList.toggle("is-collapsed"));
 document.getElementById("ledger-head").addEventListener("click", (e) => {
-  if (isPhone && e.target.id !== "ledger-toggle") ledgerEl.classList.toggle("is-collapsed");
+  if (phoneLayout() && e.target.id !== "ledger-toggle") ledgerEl.classList.toggle("is-collapsed");
 });
 document.getElementById("ledger-show").addEventListener("click", () => ledgerEl.classList.remove("is-hidden"));
 document.getElementById("save-frame").addEventListener("click", saveFrame);
@@ -461,11 +484,19 @@ window.addEventListener("resize", () => {
     if (current && (cols !== renderer.cols || rows !== renderer.rows)) rebuildGrid();
   }, RESIZE_DEBOUNCE_MS);
 });
-window.addEventListener("keydown", (e) => {
-  if (idle && (e.key === "Enter") && document.activeElement?.tagName !== "BUTTON") document.getElementById("start-mic").click();
+noteInput.addEventListener("keydown", (e) => {
+  // Enter applies the note straight away: Jev re-judges with the new context.
+  if (e.key === "Enter") {
+    noteInput.blur();
+    nextTasteAt = 0;
+  }
 });
 window.addEventListener("keydown", (e) => {
   if (e.target === noteInput) return;
+  if (idle) {
+    if (e.key === "Enter" && document.activeElement?.tagName !== "BUTTON") document.getElementById("start-mic").click();
+    return;
+  }
   if (e.key === "h" || e.key === "H") ledgerEl.classList.toggle("is-hidden");
   if (e.key === "n" || e.key === "N") nextTasteAt = 0;
   if (e.key === "s" || e.key === "S") saveFrame();

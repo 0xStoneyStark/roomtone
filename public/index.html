@@ -6,11 +6,19 @@
   <meta name="theme-color" content="#050507" />
   <title>Roomtone</title>
   <meta name="description" content="ASCII pictures art-directed by Jev from the music around you." />
+  <meta property="og:title" content="Roomtone" />
+  <meta property="og:description" content="Not a waveform. The room's sound becomes words, Jev picks the picture, and the browser rolls it from Jev's own odds." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://roomtone.heneryshop.com/" />
+  <meta property="og:image" content="https://roomtone.heneryshop.com/og.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css?v=__V__" />
-  <script type="importmap">
+  <script type="importmap" nonce="__NONCE__">
     {
       "imports": {
         "./audio.js": "./audio.js?v=__V__",
@@ -58,14 +66,14 @@
       <button id="save-frame" class="button button--quiet button--small save-frame" type="button">Save this frame</button>
     </div>
 
-    <aside id="ledger" class="ledger" aria-live="polite" aria-label="Jev's judgments">
+    <aside id="ledger" class="ledger" aria-label="Jev's judgments">
       <header class="ledger__head" id="ledger-head">
         <i class="led" aria-hidden="true"></i>
         <span class="ledger__title eyebrow">Jev heard</span>
         <span class="ledger__meta" data-meta>waiting for the first six seconds</span>
         <button id="ledger-toggle" class="ledger__button" type="button" aria-label="Collapse or expand the ledger">▾</button>
       </header>
-      <p class="ledger__message" data-message data-kind=""></p>
+      <p class="ledger__message" data-message data-kind="" aria-live="polite"></p>
       <p class="ledger__heard" data-heard></p>
       <p class="ledger__note" data-note></p>
       <div class="ledger__rows" data-taste></div>

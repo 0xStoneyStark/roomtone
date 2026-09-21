@@ -169,7 +169,7 @@ export class AsciiRenderer {
     return atlas;
   }
 
-  pass(field, atlas, alpha, ctx = this.ctx, geo = this) {
+  pass(field, atlas, alpha, ctx = this.ctx, geo = this, gain = 1) {
     const { cols, cellW, cellH, tileW, tileH, colX, rowY } = geo;
     const { canvas, slotBase, slotCount } = atlas;
     ctx.globalAlpha = alpha;
@@ -178,7 +178,7 @@ export class AsciiRenderer {
         x = 0;
         y++;
       }
-      const v = field[i];
+      const v = field[i] * gain;
       if (v < 0.04) continue;
       const level = Math.min(LEVELS - 1, Math.floor(v ** GAMMA * LEVELS));
       const slot = slotBase[level] + (slotCount[level] > 1 ? cellHash(x, y) % slotCount[level] : 0);
@@ -187,18 +187,21 @@ export class AsciiRenderer {
     ctx.globalAlpha = 1;
   }
 
-  /** The field as glyphs, with the current look (or the two looks mid-fade), onto any context/grid. */
-  paint(field, ctx, geo) {
+  /**
+   * The field as glyphs, with the current look (or the two looks mid-fade), onto any context/grid.
+   * `gain` scales brightness before quantisation: Jev's energy arc and drop charge come in here.
+   */
+  paint(field, ctx, geo, gain = 1) {
     ctx.fillStyle = "#060607";
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    if (this.lookMix < 1) this.pass(field, this.atlas(this.lookFrom, geo), 1 - this.lookMix, ctx, geo);
-    this.pass(field, this.atlas(this.lookTo, geo), this.lookMix < 1 ? this.lookMix : 1, ctx, geo);
+    if (this.lookMix < 1) this.pass(field, this.atlas(this.lookFrom, geo), 1 - this.lookMix, ctx, geo, gain);
+    this.pass(field, this.atlas(this.lookTo, geo), this.lookMix < 1 ? this.lookMix : 1, ctx, geo, gain);
   }
 
   /** `flash` 0..1 washes the whole frame toward white (used for the drop release). */
-  draw(field, dt, flash = 0) {
+  draw(field, dt, flash = 0, gain = 1) {
     this.lookMix = Math.min(1, this.lookMix + dt / LOOK_FADE_S);
-    this.paint(field, this.ctx, this);
+    this.paint(field, this.ctx, this, gain);
     if (flash > 0.01) {
       this.ctx.fillStyle = `rgba(255,250,240,${flash * 0.85})`;
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -209,7 +212,7 @@ export class AsciiRenderer {
    * The same grid re-rasterised at a much larger font size: a print-quality frame of only the art,
    * no HUD, no flash. Sized to the biggest canvas that stays inside browser limits.
    */
-  exportFrame(field) {
+  exportFrame(field, gain = 1) {
     const dpr = 1;
     const probe = document.createElement("canvas").getContext("2d");
     const baseW = this.cols * this.tileW, baseH = this.rows * this.tileH;
@@ -238,7 +241,7 @@ export class AsciiRenderer {
     const out = document.createElement("canvas");
     out.width = this.cols * tileW;
     out.height = this.rows * tileH;
-    this.paint(field, out.getContext("2d"), geo);
+    this.paint(field, out.getContext("2d"), geo, gain);
     // Export atlases are large and one-off; drop them so the screen cache stays small.
     for (const key of this.atlases.keys()) if (key.endsWith(`|${fontPx}|${dpr}`)) this.atlases.delete(key);
     return out;

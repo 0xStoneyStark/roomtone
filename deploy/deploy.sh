@@ -11,7 +11,7 @@ SSH_OPTS=()
 APP_DIR="${ROOMTONE_APP_DIR:-/opt/roomtone}"
 
 cd "$(dirname "$0")/.."
-tar czf /tmp/roomtone.tgz --exclude=node_modules --exclude=cert --exclude=.env --exclude=.git .
+tar czf /tmp/roomtone.tgz --exclude=node_modules --exclude=cert --exclude=.env --exclude=.git --exclude=media --exclude=frames .
 scp -q "${SSH_OPTS[@]}" /tmp/roomtone.tgz "$HOST:/tmp/roomtone.tgz"
 ssh "${SSH_OPTS[@]}" "$HOST" APP_DIR="$APP_DIR" 'bash -s' <<'REMOTE'
 set -euo pipefail

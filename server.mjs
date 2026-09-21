@@ -2,7 +2,7 @@
 // API key and the question set stay on this side of the network. With a
 // certificate in cert/ (see `npm run cert`) it also listens on https, which
 // phones need before they will hand over the microphone.
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
@@ -43,8 +43,23 @@ const MIME = {
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
   ".json": "application/json; charset=utf-8",
 };
+
+// Sent with every response. The CSP allows only this origin's scripts (plus the nonce'd import
+// map), Google Fonts, and blob/data images for the frame export.
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "permissions-policy": "microphone=(self), camera=(), geolocation=()",
+};
+const csp = (nonce) =>
+  `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' https://fonts.googleapis.com; ` +
+  "font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; media-src 'self' blob:; " +
+  "frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
 // Build id from the public files, baked into index.html's asset URLs. Cloudflare caches .js/.css at
 // the edge for hours regardless of origin no-cache, so every deploy must change the URLs.
@@ -89,7 +104,7 @@ function tokensThisHour(now) {
 }
 
 function sendJson(res, status, body) {
-  res.writeHead(status, { "content-type": MIME[".json"], "cache-control": "no-store" });
+  res.writeHead(status, { ...SECURITY_HEADERS, "content-type": MIME[".json"], "cache-control": "no-store" });
   res.end(JSON.stringify(body));
 }
 
@@ -185,13 +200,15 @@ async function serveStatic(req, res) {
     // Versioned asset URLs may be cached forever; everything else must not be cached at all.
     const versioned = url.searchParams.get("v") === BUILD;
     const cache = versioned ? "public, max-age=31536000, immutable" : "no-store";
+    const headers = { ...SECURITY_HEADERS, "content-type": type, "cache-control": cache };
     if (rel === "index.html") {
-      const html = (await readFile(path, "utf8")).replaceAll("__V__", BUILD);
-      res.writeHead(200, { "content-type": type, "cache-control": cache });
-      return res.end(html);
+      const nonce = randomBytes(16).toString("base64");
+      const html = (await readFile(path, "utf8")).replaceAll("__V__", BUILD).replaceAll("__NONCE__", nonce);
+      res.writeHead(200, { ...headers, "content-security-policy": csp(nonce) });
+      return res.end(req.method === "HEAD" ? undefined : html);
     }
-    res.writeHead(200, { "content-type": type, "cache-control": cache });
-    res.end(await readFile(path));
+    res.writeHead(200, headers);
+    res.end(req.method === "HEAD" ? undefined : await readFile(path));
   } catch {
     res.writeHead(404, { "content-type": "text/plain" }).end("not found");
   }
@@ -202,8 +219,8 @@ async function handle(req, res) {
   if (req.method === "GET" && req.url === "/api/health") {
     return sendJson(res, 200, { ok: true, hasKey, model: MODEL, build: BUILD, tokens_this_hour: tokensThisHour(Date.now()), budget_per_hour: TOKEN_BUDGET_PER_HOUR });
   }
-  if (req.method === "GET") return serveStatic(req, res);
-  res.writeHead(405).end();
+  if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res);
+  res.writeHead(405, SECURITY_HEADERS).end();
 }
 
 function lanAddresses() {

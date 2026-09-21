@@ -7,6 +7,11 @@ const FFT_SIZE = 2048;
 const WINDOW_S = 6; // how much history a Jev description covers
 const BEAT_REFRACTORY_MS = 120;
 const SILENCE_DB = -55;
+// Tempo prior: a log-Gaussian around 120 BPM (one octave wide), the standard fix for the
+// autocorrelation peak landing on a half, double or 3:2 tempo.
+const TEMPO_PRIOR_BPM = 120;
+const TEMPO_PRIOR_OCTAVES = 0.6;
+const PEAK_DB_RELEASE = 0.4; // dB per second the session's loudest level relaxes by
 
 const TEMPO_BUCKETS = [
   [72, "very slow"], [88, "slow"], [100, "walking pace"], [116, "mid-tempo"],
@@ -28,6 +33,11 @@ const TEXTURE_BUCKETS = [
 ];
 const DYNAMICS_BUCKETS = [
   [2, "flat and compressed, constant level"], [5, "moderate swings"], [Infinity, "big swings between hits and near-silence"],
+];
+// Where this passage sits against the loudest the session has heard: mic gain drops out of the comparison.
+const RELATIVE_BUCKETS = [
+  [-15, "far below the loudest heard so far"], [-8, "well below the loudest heard so far"],
+  [-3, "a little below the loudest heard so far"], [Infinity, "at the loudest heard so far"],
 ];
 
 function bucket(value, table) {
@@ -67,6 +77,7 @@ export class Ear {
     this.smoothEnergy = 0;
     this.smoothBass = 0;
     this.holdDb = -100;
+    this.peakDb = -100;
     this.lastT = 0;
   }
 
@@ -149,6 +160,7 @@ export class Ear {
 
     // Loudness with a 25 dB/s release, so gaps between hits do not read as silence.
     this.holdDb = Math.max(db, this.holdDb - 25 * (t - this.lastT));
+    this.peakDb = Math.max(db, this.peakDb - PEAK_DB_RELEASE * (t - this.lastT));
     this.lastT = t;
 
     return {
@@ -196,16 +208,20 @@ export class Ear {
     if (norm < 1e-9) return null;
     let bestLag = 0;
     let best = 0;
+    let bestRaw = 0;
     for (let lag = Math.round(RATE * 60 / 180); lag <= Math.round(RATE * 60 / 60); lag++) {
       let acc = 0;
       for (let i = lag; i < n; i++) acc += env[i] * env[i - lag];
       const r = acc / norm;
-      if (r > best) {
-        best = r;
+      const bpm = (60 * RATE) / lag;
+      const prior = Math.exp(-0.5 * (Math.log2(bpm / TEMPO_PRIOR_BPM) / TEMPO_PRIOR_OCTAVES) ** 2);
+      if (r * prior > best) {
+        best = r * prior;
+        bestRaw = r;
         bestLag = lag;
       }
     }
-    if (best < 0.25) return null;
+    if (bestRaw < 0.25) return null;
     return Math.round((60 * RATE) / bestLag);
   }
 
@@ -230,10 +246,10 @@ export class Ear {
     else if (dbSlope < -3) trend = "getting quieter over the last few seconds";
     else if (dbStd > 6) trend = "swelling and dropping";
 
-    // Tempo always uses the full history: two seconds is too short for autocorrelation.
+    // Tempo and regularity always use the full history: two seconds holds too few hits to judge either.
     const bpm = this.estimateTempo();
     this.lastBpm = bpm ?? 0;
-    const intervals = onsets.slice(1).map((o, i) => o.t - onsets[i].t);
+    const intervals = this.onsets.slice(1).map((o, i) => o.t - this.onsets[i].t);
     const cv = intervals.length > 3 ? std(intervals) / (mean(intervals) + 1e-9) : 1;
     const regularity = cv < 0.2 ? "steady" : cv < 0.45 ? "loose" : "irregular";
     const tempo = bpm ? `${bucket(bpm, TEMPO_BUCKETS)}, around ${bpm} beats per minute, ${regularity}` : "no steady beat";
@@ -247,7 +263,7 @@ export class Ear {
 
     return {
       tempo,
-      loudness: bucket(avgDb, LOUDNESS_BUCKETS),
+      loudness: `${bucket(avgDb, LOUDNESS_BUCKETS)}, ${bucket(avgDb - this.peakDb, RELATIVE_BUCKETS)}`,
       loudness_trend: trend,
       bass: bucket(mean(recent.map((h) => h.bassRatio)), BASS_BUCKETS),
       brightness: bucket(mean(recent.map((h) => h.centroid)), BRIGHTNESS_BUCKETS),
