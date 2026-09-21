@@ -34,7 +34,7 @@ const BASELINE_SETTLE_MS = 3000; // the "sound at the picture" keeps updating th
 const DEFAULT_HOLD_S = 45;
 // Jev listens this long per press of Start. The site is public, so every start bounds the spend;
 // the picture keeps moving afterwards, and another press starts Jev again.
-const SESSION_S = 150;
+const SESSION_S = 150; // the server's default; the real length arrives with each session
 const SESSION_LABEL = "2½ minutes";
 const SILENCE_RETRY_MS = 500;
 const ROLL_SHARPNESS = 1.5; // 1 = roll straight from Jev's odds; higher favours its stronger options
@@ -78,6 +78,8 @@ const holdInput = document.getElementById("cadence");
 const holdLabel = document.getElementById("cadence-label");
 const liveInput = document.getElementById("live");
 const restEl = document.getElementById("rest");
+const restBody = document.getElementById("rest-body");
+const restDefault = restBody.textContent;
 const ear = new Ear();
 
 const figure = new Layer(PATTERNS, renderer.cols, renderer.rows, renderer.aspect, "embers");
@@ -101,6 +103,8 @@ let sceneSound = null; // a pulse-window description from when the current pictu
 let turnStreak = 0;
 let sessionEndsAt = 0;
 let jevResting = false;
+let session = null; // the server's token for this start; every judgment carries it
+let sourceName = "demo";
 let pulseRunning = false;
 let judgeCount = 0;
 let sessionTokens = 0;
@@ -196,12 +200,15 @@ async function postJudge(payload) {
   const res = await fetch("/api/judge", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, session }),
   });
   const body = await res.json();
   if (!res.ok) {
     const err = new Error(body.error ?? `HTTP ${res.status}`);
     err.status = res.status;
+    err.code = body.code;
+    // The server closed this start (time up, or this address has had its starts for the hour).
+    if (err.code === "session_expired" || err.code === "sessions_exhausted") restJev(err.code === "sessions_exhausted" ? body.error : null);
     throw err;
   }
   judgeCount += 1;
@@ -238,6 +245,7 @@ async function judgeTaste() {
     lastSceneAt = performance.now();
     nextTasteAt = lastSceneAt + holdMs;
   } catch (err) {
+    if (err.code) return; // resting now; nothing to retry
     // Keep the show moving: roll again from Jev's last odds (or the starter set) and retry later.
     tasteFailures += 1;
     const wait = Math.min(MAX_BACKOFF_MS, 6000 * 2 ** tasteFailures);
@@ -296,6 +304,7 @@ async function pulseLoop() {
       pulseFailures = 0;
       if (performance.now() - lastSceneAt < BASELINE_SETTLE_MS) sceneSound = sound;
     } catch (err) {
+      if (err.code) continue; // resting now: the loop condition ends it
       pulseFailures += 1;
       const wait = err.status === 503 ? BUDGET_BACKOFF_MS : Math.min(MAX_BACKOFF_MS, PULSE_ERROR_BACKOFF_MS * 2 ** (pulseFailures - 1));
       ledger.say(`${failureText(err)} — live feel paused, retrying in ${Math.round(wait / 1000)} s`, "error");
@@ -470,19 +479,40 @@ function frame(now) {
   if (now >= nextTasteAt) judgeTaste();
 }
 
-/** The per-start budget is spent: stop asking Jev, keep the picture moving, offer another start. */
-function restJev() {
-  jevResting = true;
-  restEl.hidden = false;
-  ledger.say(`Jev has listened for ${SESSION_LABEL} — press Start Jev again to keep going.`, "wait");
+/** Ask the server for a session: SESSION_S seconds of Jev on this start. False when this address is out of starts. */
+async function openSession() {
+  try {
+    const res = await fetch("/api/session", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ source: sourceName }) });
+    const body = await res.json();
+    if (!res.ok) {
+      session = null;
+      restJev(body.error ?? `Could not start a Jev session (${res.status}).`);
+      return false;
+    }
+    session = body.session;
+    sessionEndsAt = performance.now() + (body.seconds || SESSION_S) * 1000;
+    return true;
+  } catch (err) {
+    session = null;
+    restJev(`Could not reach the server to start Jev: ${err.message}`);
+    return false;
+  }
 }
 
-function resumeJev() {
+/** The per-start budget is spent: stop asking Jev, keep the picture moving, offer another start. */
+function restJev(message = null) {
+  jevResting = true;
+  restEl.hidden = false;
+  restBody.textContent = message ?? restDefault;
+  ledger.say(message ?? `Jev has listened for ${SESSION_LABEL} — press Start Jev again to keep going.`, "wait");
+}
+
+async function resumeJev() {
   if (!jevResting) return;
+  if (!(await openSession())) return;
   jevResting = false;
   restEl.hidden = true;
   ledger.say("");
-  sessionEndsAt = performance.now() + SESSION_S * 1000;
   nextTasteAt = 0;
   pulseLoop();
 }
@@ -515,6 +545,7 @@ async function start(source) {
     note.textContent = err.name === "NotAllowedError" ? "Microphone blocked. Allow the mic for this page, or play the demo loop." : `Could not start audio: ${err.message}`;
     return;
   }
+  sourceName = source === micSource ? "mic" : "demo";
   idle = false;
   intro.hidden = true;
   document.getElementById("hud").hidden = false;
@@ -528,7 +559,7 @@ async function start(source) {
   nextGovernorAt = startedAt + 4000;
   sessionEndsAt = startedAt + SESSION_S * 1000;
   requestAnimationFrame(frame);
-  pulseLoop();
+  if (await openSession()) pulseLoop();
 }
 
 allocMasks();

@@ -115,7 +115,17 @@ per-request nonce), `nosniff`, `frame-ancestors 'none'` and a microphone-only Pe
 - **what's playing, or where are you?** — free text that goes into Jev's state with the audio description.
 - **H** hides the ledger, **N** asks Jev for a new picture right now.
 - **hold a picture at most** — 10–120 s; a new picture comes sooner when Jev judges the music has turned.
-- **Start Jev again** — each press of Start gives Jev 2½ minutes (`SESSION_S` in `app.js`). After that the picture keeps moving on its last odds and no calls are made until the button is pressed; on a public deployment this bounds the spend per visitor, alongside the server's per-IP rate limit and hourly token budget.
+- **Start Jev again** — each press of Start opens a server-side session (`POST /api/session`) good for 2½ minutes of Jev (`SESSION_S`, default 150, on the server; the page's copy says "2½ minutes", change both together). Every judgment carries the session token; when it expires the server answers 429 `session_expired`, the picture keeps moving on its last odds, and the button opens the next session. An address gets `SESSIONS_PER_IP_PER_HOUR` (default 6) starts per rolling hour, then 429 `sessions_exhausted` with a retry time. Together with the per-IP rate limit (300 calls/min) and the hourly token budget this bounds what a public deployment can spend.
+
+## What people try (words, never audio)
+
+The server appends one JSON line per event to `data/sessions.jsonl` (`DATA_DIR` to move it; the directory is excluded from deploys, so it survives them):
+
+- `session` — hashed address (`IP_SALT`), country (Cloudflare's `cf-ipcountry`), phone or desktop, mic or demo
+- `taste` — seconds into the session, the ear's word buckets for the sound (tempo, loudness, bass, brightness, rhythm, texture, dynamics), the listener note as typed, and Jev's headline pick for every question
+- `end` — how long the session ran, calls, pictures, tokens
+
+No audio is ever sent to the server; the browser turns sound into those words locally. `npm run sessions` (or `node scripts/sessions.mjs path/to/sessions.jsonl`) prints a summary: sessions per day, sources, countries, the most typed notes, the most common sound words, and what Jev picked.
 - **live feel** — the continuous pulse loop (on by default).
 - **Save this frame** (or **S**) — the frame on screen as a PNG of the art alone (no HUD, no
   caption), re-rasterised at print resolution: the same glyph grid drawn at a much larger font size,

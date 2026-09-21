@@ -6,7 +6,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,16 @@ const RATE_LIMIT_PER_MIN = 300; // the live loop peaks at 150/min; the rest is h
 const TRUST_PROXY = process.env.TRUST_PROXY === "1";
 // Hard ceiling on what all visitors together can spend, per rolling hour. 8M tokens ≈ $0.34 at list price.
 const TOKEN_BUDGET_PER_HOUR = Number(process.env.TOKEN_BUDGET_PER_HOUR) || 8_000_000;
+// Each press of Start opens a session: a token the browser sends with every judgment, good for
+// SESSION_S seconds. An address gets SESSIONS_PER_IP_PER_HOUR of them, so the browser's timer is
+// a mirror of a limit the server owns. (The page's copy says "2½ minutes": change both together.)
+const SESSION_S = Number(process.env.SESSION_S) || 150;
+const SESSIONS_PER_IP_PER_HOUR = Number(process.env.SESSIONS_PER_IP_PER_HOUR) || 6;
+// What people try, in words only: the note they typed, the ear's descriptors, Jev's picks, mic or
+// demo, country and device. No audio ever reaches the server; addresses are stored hashed.
+const DATA_DIR = process.env.DATA_DIR || fileURLToPath(new URL("./data/", import.meta.url));
+const LOG_FILE = join(DATA_DIR, "sessions.jsonl");
+const IP_SALT = process.env.IP_SALT || "roomtone";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -103,6 +113,59 @@ function tokensThisHour(now) {
   return spend.reduce((sum, s) => sum + s.tokens, 0);
 }
 
+/** One line per event in data/sessions.jsonl; a failing disk is logged, never fatal. */
+let logChain = mkdir(DATA_DIR, { recursive: true }).catch((err) => console.error(`[log] cannot create ${DATA_DIR}: ${err.message}`));
+function logEvent(event) {
+  const line = JSON.stringify({ t: new Date().toISOString(), ...event }) + "\n";
+  logChain = logChain.then(() => appendFile(LOG_FILE, line)).catch((err) => console.error(`[log] ${err.message}`));
+}
+
+const hashIp = (ip) => createHash("sha256").update(IP_SALT + ip).digest("hex").slice(0, 16);
+const deviceOf = (ua = "") => (/Mobi|Android|iPhone|iPad/i.test(ua) ? "phone" : "desktop");
+
+const sessions = new Map(); // id → { id, ip, startedAt, expiresAt, calls, taste, tokens }
+const sessionStarts = new Map(); // ip → start times within the last hour
+
+function startsThisHour(ip, now) {
+  const list = (sessionStarts.get(ip) ?? []).filter((t) => now - t < 3_600_000);
+  sessionStarts.set(ip, list);
+  return list;
+}
+
+/** A press of Start. Returns { session } or { error: { status, body } }. */
+function openSession(req, body) {
+  const ip = clientIp(req);
+  const now = Date.now();
+  const starts = startsThisHour(ip, now);
+  if (starts.length >= SESSIONS_PER_IP_PER_HOUR) {
+    const retryS = Math.ceil((starts[0] + 3_600_000 - now) / 1000);
+    return { error: { status: 429, body: { error: `This connection has had its ${SESSIONS_PER_IP_PER_HOUR} starts for the hour — Jev is back in about ${Math.max(1, Math.ceil(retryS / 60))} minutes.`, code: "sessions_exhausted", retry_s: retryS } } };
+  }
+  starts.push(now);
+  const id = randomBytes(12).toString("hex");
+  const session = { id, ip, startedAt: now, expiresAt: now + SESSION_S * 1000, calls: 0, taste: 0, tokens: 0 };
+  sessions.set(id, session);
+  const source = body?.source === "mic" || body?.source === "demo" ? body.source : "unknown";
+  logEvent({ type: "session", session: id, ip: hashIp(ip), country: req.headers["cf-ipcountry"] ?? null, device: deviceOf(req.headers["user-agent"]), source });
+  return { session };
+}
+
+function closeSession(session, reason) {
+  sessions.delete(session.id);
+  logEvent({ type: "end", session: session.id, reason, seconds: Math.round((Date.now() - session.startedAt) / 1000), calls: session.calls, taste: session.taste, tokens: session.tokens });
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const session of sessions.values()) if (now >= session.expiresAt) closeSession(session, "expired");
+  for (const [ip, list] of sessionStarts) if (!list.some((t) => now - t < 3_600_000)) sessionStarts.delete(ip);
+}, 15_000).unref();
+
+/** Jev's headline answer per question, for the log: the choice, the score, or the yes-probability. */
+function picksOf(answers) {
+  return Object.fromEntries(Object.entries(answers).map(([id, a]) => [id, a.type === "choice" ? a.choice : a.type === "score" ? Math.round(a.score * 10) / 10 : Math.round(a.noul * 100) / 100]));
+}
+
 function sendJson(res, status, body) {
   res.writeHead(status, { ...SECURITY_HEADERS, "content-type": MIME[".json"], "cache-control": "no-store" });
   res.end(JSON.stringify(body));
@@ -162,15 +225,32 @@ async function handleJudge(req, res) {
   if (!client) {
     return sendJson(res, 503, { error: "TYPESAFE_API_KEY is not set on the server. Add it to .env and restart." });
   }
-  if (rateLimited(clientIp(req))) {
+  const ip = clientIp(req);
+  if (rateLimited(ip)) {
     return sendJson(res, 429, { error: "Too many judgments from this address. Slow the cadence down." });
+  }
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    return sendJson(res, 400, { error: `Bad request: ${err.message}` });
+  }
+  // The token is the credential (96 random bits); it is not tied to the address, because dual-stack
+  // localhost and phones changing networks would otherwise lose their session mid-way.
+  const session = typeof body?.session === "string" ? sessions.get(body.session) : undefined;
+  if (!session) {
+    return sendJson(res, 401, { error: "No open Jev session on this connection — press Start.", code: "session_expired" });
+  }
+  if (Date.now() >= session.expiresAt) {
+    closeSession(session, "expired");
+    return sendJson(res, 429, { error: `Jev has listened for ${SESSION_S} seconds on this start — press Start Jev again to keep going.`, code: "session_expired" });
   }
   if (tokensThisHour(Date.now()) >= TOKEN_BUDGET_PER_HOUR) {
     return sendJson(res, 503, { error: "This hour's Jev budget is used up. The pictures keep moving; judgments resume within the hour." });
   }
   let request;
   try {
-    request = buildRequest(await readJsonBody(req));
+    request = buildRequest(body);
   } catch (err) {
     return sendJson(res, 400, { error: `Bad request: ${err.message}` });
   }
@@ -179,6 +259,12 @@ async function handleJudge(req, res) {
   try {
     const result = await client.systemOne({ state: request.state, questions: request.questions });
     spend.push({ t: Date.now(), tokens: result.usage.input_tokens });
+    session.calls += 1;
+    session.tokens += result.usage.input_tokens;
+    if (request.set !== "pulse") {
+      session.taste += 1;
+      logEvent({ type: "taste", session: session.id, at: Math.round((Date.now() - session.startedAt) / 1000), sound: request.state.sound, note: request.state.listener_note, picks: picksOf(result.answers) });
+    }
     sendJson(res, 200, {
       set: request.set,
       model: result.model,
@@ -223,10 +309,24 @@ async function serveStatic(req, res) {
   }
 }
 
+async function handleSession(req, res) {
+  let body = null;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    // an empty or malformed body only loses the source label
+  }
+  const opened = openSession(req, body);
+  if (opened.error) return sendJson(res, opened.error.status, opened.error.body);
+  const left = SESSIONS_PER_IP_PER_HOUR - startsThisHour(opened.session.ip, Date.now()).length;
+  sendJson(res, 200, { session: opened.session.id, seconds: SESSION_S, starts_left: left });
+}
+
 async function handle(req, res) {
   if (req.method === "POST" && req.url === "/api/judge") return handleJudge(req, res);
+  if (req.method === "POST" && req.url === "/api/session") return handleSession(req, res);
   if (req.method === "GET" && req.url === "/api/health") {
-    return sendJson(res, 200, { ok: true, hasKey, model: MODEL, build: BUILD, tokens_this_hour: tokensThisHour(Date.now()), budget_per_hour: TOKEN_BUDGET_PER_HOUR });
+    return sendJson(res, 200, { ok: true, hasKey, model: MODEL, build: BUILD, tokens_this_hour: tokensThisHour(Date.now()), budget_per_hour: TOKEN_BUDGET_PER_HOUR, sessions_active: sessions.size, session_s: SESSION_S });
   }
   if (req.method === "GET" || req.method === "HEAD") return serveStatic(req, res);
   res.writeHead(405, SECURITY_HEADERS).end();

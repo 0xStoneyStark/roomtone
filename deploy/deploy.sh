@@ -12,7 +12,7 @@ APP_DIR="${ROOMTONE_APP_DIR:-/opt/roomtone}"
 
 cd "$(dirname "$0")/.."
 # One SSH connection: the tarball streams over stdin, then the remote script continues.
-tar czf - --exclude=node_modules --exclude=cert --exclude=.env --exclude=.git --exclude=media --exclude=frames .   | ssh "${SSH_OPTS[@]}" "$HOST" APP_DIR="$APP_DIR" 'bash -c "$(cat <<'"'"'REMOTE'"'"'
+tar czf - --exclude=node_modules --exclude=cert --exclude=.env --exclude=.git --exclude=media --exclude=frames --exclude=data .   | ssh "${SSH_OPTS[@]}" "$HOST" APP_DIR="$APP_DIR" 'bash -c "$(cat <<'"'"'REMOTE'"'"'
 set -euo pipefail
 mkdir -p "$APP_DIR"
 tar xzf - -C "$APP_DIR"
