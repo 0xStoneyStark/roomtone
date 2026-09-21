@@ -18,12 +18,32 @@ export async function demoSource(ctx) {
   let beatIndex = 0;
   let nextAt = ctx.currentTime + 0.1;
 
-  function kick(at) {
+  // A sustained pad (A minor, detuned saws through a lowpass) under the drums, so the loop has body
+  // between hits; its filter opens with the build and its level lifts on the drop.
+  const padFilter = ctx.createBiquadFilter();
+  padFilter.type = "lowpass";
+  padFilter.frequency.value = 500;
+  padFilter.Q.value = 0.8;
+  const padGain = ctx.createGain();
+  padGain.gain.value = 0.11;
+  padFilter.connect(padGain).connect(out);
+  for (const hz of [110, 130.81, 164.81, 220]) {
+    for (const detune of [-7, 7]) {
+      const osc = ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.value = hz;
+      osc.detune.value = detune;
+      osc.connect(padFilter);
+      osc.start();
+    }
+  }
+
+  function kick(at, level = 1) {
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
     osc.frequency.setValueAtTime(150, at);
     osc.frequency.exponentialRampToValueAtTime(45, at + 0.25);
-    g.gain.setValueAtTime(1, at);
+    g.gain.setValueAtTime(level, at);
     g.gain.exponentialRampToValueAtTime(0.001, at + 0.35);
     osc.connect(g).connect(out);
     osc.start(at);
@@ -67,8 +87,11 @@ export async function demoSource(ctx) {
       const building = phrasePos < 0.5;
       const build = building ? phrasePos * 2 : 0; // rises 0..1 over the first 8 bars
       const inBeat = beatIndex % 4;
+      padFilter.frequency.linearRampToValueAtTime(building ? 400 + 1800 * build : 2600, nextAt);
+      padGain.gain.linearRampToValueAtTime(building ? 0.1 + 0.04 * build : 0.16, nextAt);
 
-      if (!building || build > 0.35) kick(nextAt);
+      // The build keeps a softer kick under the hats, so it reads as a passage rather than a gap.
+      kick(nextAt, building ? 0.55 + 0.45 * build : 1);
       if (building) {
         hat(nextAt, 0.15 + 0.35 * build);
         if (build > 0.6) hat(nextAt + BEAT / 2, 0.3 * build);

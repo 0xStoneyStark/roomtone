@@ -77,7 +77,8 @@ export class Ear {
     this.smoothEnergy = 0;
     this.smoothBass = 0;
     this.holdDb = -100;
-    this.peakDb = -100;
+    this.peakAvgDb = -100; // loudest window average described so far, for the relative loudness wording
+    this.lastDescribedAt = 0;
     this.lastT = 0;
   }
 
@@ -160,7 +161,6 @@ export class Ear {
 
     // Loudness with a 25 dB/s release, so gaps between hits do not read as silence.
     this.holdDb = Math.max(db, this.holdDb - 25 * (t - this.lastT));
-    this.peakDb = Math.max(db, this.peakDb - PEAK_DB_RELEASE * (t - this.lastT));
     this.lastT = t;
 
     return {
@@ -237,6 +237,10 @@ export class Ear {
     const dbs = recent.map((h) => h.db);
     const avgDb = mean(dbs);
     if (avgDb < SILENCE_DB) return null;
+    // Compare window averages with window averages: an instantaneous kick peak would make every
+    // passage read as "far below the loudest".
+    this.peakAvgDb = Math.max(avgDb, this.peakAvgDb - PEAK_DB_RELEASE * Math.max(0, tEnd - this.lastDescribedAt));
+    this.lastDescribedAt = tEnd;
 
     const ts = recent.map((h) => h.t);
     const dbSlope = slope(ts, dbs) * windowS; // dB change across the window
@@ -263,7 +267,7 @@ export class Ear {
 
     return {
       tempo,
-      loudness: `${bucket(avgDb, LOUDNESS_BUCKETS)}, ${bucket(avgDb - this.peakDb, RELATIVE_BUCKETS)}`,
+      loudness: `${bucket(avgDb, LOUDNESS_BUCKETS)}, ${bucket(avgDb - this.peakAvgDb, RELATIVE_BUCKETS)}`,
       loudness_trend: trend,
       bass: bucket(mean(recent.map((h) => h.bassRatio)), BASS_BUCKETS),
       brightness: bucket(mean(recent.map((h) => h.centroid)), BRIGHTNESS_BUCKETS),
