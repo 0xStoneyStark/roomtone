@@ -340,8 +340,10 @@ function saveFrame() {
   }, "image/png");
 }
 
+const GOVERNOR_OFF = new URLSearchParams(location.search).has("nogov"); // for recordings, where capture throttles rAF
+
 function govern(now) {
-  if (now < nextGovernorAt) return;
+  if (GOVERNOR_OFF || now < nextGovernorAt) return;
   nextGovernorAt = now + GOVERNOR_INTERVAL_MS;
   if (document.hidden || next || renderer.budget <= GOVERNOR_MIN_CELLS) return; // transitions double the work briefly
   const slow = workMs > GOVERNOR_WORK_MS || fps < GOVERNOR_MIN_FPS;

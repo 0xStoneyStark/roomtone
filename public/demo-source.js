@@ -4,7 +4,7 @@
 
 const BPM = 128;
 const BEAT = 60 / BPM;
-const BARS_PER_PHRASE = 8;
+const BARS_PER_PHRASE = 4; // 4 bars of build, 4 of drop: the arc shows within ten seconds
 
 export async function demoSource(ctx) {
   const out = ctx.createGain();
