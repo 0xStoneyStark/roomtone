@@ -655,3 +655,33 @@ kbd {
     animation: none;
   }
 }
+
+/* Paper theme -------------------------------------------------------------
+   Set by app.js as html[data-paper="1"] when the current palette (ink, sepia,
+   riso) is a light "paper" one. Redefines the chrome as ink on paper; --accent
+   keeps coming from JS (the mid tone of whatever paper palette is current), so
+   everything already keyed off --accent-* follows without an override here. */
+
+html[data-paper="1"] {
+  --bg: #efe9dc;
+  --ink: #1c1812;
+  --ink-70: rgba(28, 24, 18, 0.7);
+  --ink-45: rgba(28, 24, 18, 0.45);
+  --ink-15: rgba(28, 24, 18, 0.15);
+  --ink-08: rgba(28, 24, 18, 0.08);
+  /* A shade darker than --bg, for surfaces that sit on top of the page. */
+  --paper-surface: 226, 219, 203;
+}
+
+html[data-paper="1"] .ledger {
+  background: rgba(var(--paper-surface), 0.92);
+}
+
+html[data-paper="1"] .status span {
+  background: rgba(var(--paper-surface), 0.75);
+}
+
+html[data-paper="1"] .intro__title {
+  /* A glow reads as light on dark; on paper a letterpress-style offset reads as ink instead. */
+  text-shadow: 0 1px 0 var(--accent-35);
+}

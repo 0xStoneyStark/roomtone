@@ -1,12 +1,15 @@
 // Roomtone: the loop that ties the ear, Jev, and the renderer together.
 // Code keeps the clock, the beat, and the crossfades; Jev supplies taste on
-// two clocks: the scene ("taste") every few seconds, the feel ("pulse") as
+// two clocks: the scene ("taste") when the music turns, the feel ("pulse") as
 // fast as calls return.
 import { Ear, micSource } from "./audio.js";
 import { demoSource } from "./demo-source.js";
 import { Ledger } from "./ledger.js";
 import { PATTERNS } from "./patterns.js";
-import { AsciiRenderer, PALETTES } from "./render.js";
+import { AsciiRenderer } from "./render.js";
+import { PALETTES } from "./palettes.js";
+import { Layer, CROSSFADE_S } from "./layer.js";
+import { makeMask, applyMask, mixMasks } from "./composition.js";
 
 const TASTE_WINDOW_S = 6;
 const PULSE_WINDOW_S = 2;
@@ -15,16 +18,17 @@ const PULSE_ERROR_BACKOFF_MS = 2500; // doubles per consecutive failure, up to M
 const MAX_BACKOFF_MS = 60_000;
 const BUDGET_BACKOFF_MS = 60_000; // the server said this hour's Jev budget is spent
 const PULSE_EASE_S = 0.5; // how fast live params chase Jev's latest answer
-const CROSSFADE_S = 2.2; // pattern, motion and look all cross over together
-const WARM_STEPS = 30; // coarse simulated steps a new pattern gets before it starts fading in
-const WARM_DT = 1 / 15;
+const SCENE_EASE_S = 2.2; // emptiness and accent settle over the same span as the crossfades
 const FLASH_DECAY = 2.5;
 const DROP_CHARGE_MIN = 0.65; // Jev's drop_soon probability needed to arm a release
 const DROP_BEAT_MIN = 0.7;
 const DROP_ENERGY_JUMP = 1.5; // energy vs the last few seconds' average
 const DROP_BASELINE_MS = 4000;
 const DROP_COOLDOWN_MS = 10000;
-const DEFAULT_CADENCE_S = 6;
+// Scenes end when Jev judges the music has turned, or after the hold the slider sets.
+const TURN_MIN = 0.65;
+const MIN_HOLD_MS = 8000;
+const DEFAULT_HOLD_S = 45;
 const SILENCE_RETRY_MS = 500;
 const ROLL_SHARPNESS = 1.5; // 1 = roll straight from Jev's odds; higher favours its stronger options
 const STATUS_HZ = 4;
@@ -33,6 +37,8 @@ const STATUS_HZ = 4;
 const ARC_GAIN_MIN = 0.7;
 const ARC_GAIN_MAX = 1.2;
 const DROP_SHIMMER = 0.4;
+const GROUND_GAIN = 0.42; // the ground layer stays a dim under-painting
+const ACCENT_SHARE = [0, 0.06, 0.25]; // share of the loudest marks in the accent colour, per Jev level
 const GOVERNOR_OFF = new URLSearchParams(location.search).has("nogov"); // for recordings, where capture throttles rAF
 // Quality governor: shrink the glyph grid when frames run long, never grow it back mid-session.
 const GOVERNOR_INTERVAL_MS = 1500;
@@ -45,9 +51,11 @@ const RESIZE_DEBOUNCE_MS = 250;
 
 // Same breakpoint as the stylesheet's phone layout, checked when it matters rather than at load.
 const phoneLayout = () => matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 720px)").matches;
-const params = { density: 0.35, turbulence: 0.35, arc: 0.3, drop: 0, speed: 0.5 };
-const targets = { density: 0.35, turbulence: 0.35, arc: 0.3 };
+const params = { density: 0.35, turbulence: 0.35, arc: 0.3, drop: 0, speed: 0.5, emptiness: 0, accent: 0 };
+const targets = { density: 0.35, turbulence: 0.35, arc: 0.3, emptiness: 0, accent: 0 };
+const groundParams = { ...params };
 const motions = { from: "drift", to: "drift", mix: 1 }; // blended over CROSSFADE_S so speed never jumps
+const placement = { from: "bleed", to: "bleed", mix: 1 }; // composition masks crossfade the same way
 let beatEnv = 0;
 let surgePhase = 0;
 let stutterHold = 0;
@@ -58,15 +66,16 @@ const ledgerEl = document.getElementById("ledger");
 const ledger = new Ledger(ledgerEl);
 const statusCells = Object.fromEntries([...document.querySelectorAll("#status [data-k]")].map((n) => [n.dataset.k, n]));
 const noteInput = document.getElementById("note");
-const cadenceInput = document.getElementById("cadence");
-const cadenceLabel = document.getElementById("cadence-label");
+const holdInput = document.getElementById("cadence");
+const holdLabel = document.getElementById("cadence-label");
 const liveInput = document.getElementById("live");
 const ear = new Ear();
 
-let current = null; // { name, field, gen }
-let next = null; // same shape, plus warm: steps still owed before the fade starts
-let fade = 0;
-let blend = null;
+const figure = new Layer(PATTERNS, renderer.cols, renderer.rows, renderer.aspect, "embers");
+const ground = new Layer(PATTERNS, renderer.cols, renderer.rows, renderer.aspect, "none");
+const figureLook = renderer.createLook("dots", "bone");
+const groundLook = renderer.createLook("dots", "bone");
+let masks = null; // { from, to, mixed, figure, ground } Float32Arrays sized to the grid
 let flash = 0;
 let lastFrame = 0;
 let startedAt = 0;
@@ -78,13 +87,15 @@ let governorStrikes = 0;
 let resizeTimer = 0;
 let tasteInFlight = false;
 let nextTasteAt = 0;
+let lastSceneAt = 0;
+let sceneSound = null; // the description Jev saw when the current picture was chosen
 let pulseRunning = false;
 let judgeCount = 0;
 let sessionTokens = 0;
 let energyTrail = [];
 let lastReleaseAt = -Infinity;
 let idle = true; // before Start: a quiet picture plays behind the intro with no audio
-let lastField = null; // the field drawn in the most recent frame, for exports
+let lastLayers = null; // what the most recent frame drew, for exports
 let lastGain = 1;
 let lastTaste = null; // Jev's most recent scene answers, re-rolled while Jev is unreachable
 let tasteFailures = 0;
@@ -93,9 +104,13 @@ let pulseFailures = 0;
 // Calm starter odds for when Jev has not answered yet at all.
 const STARTER_TASTE = {
   pattern: { probabilities: { embers: 0.4, plasma: 0.3, flow: 0.3 }, choice: "embers" },
+  ground: { probabilities: { none: 0.7, flow: 0.3 }, choice: "none" },
   glyphs: { probabilities: { dots: 0.5, classic: 0.3, braille: 0.2 }, choice: "dots" },
   palette: { probabilities: { bone: 0.4, glacier: 0.3, dusk: 0.3 }, choice: "bone" },
   motion: { probabilities: { drift: 0.6, breathe: 0.4 }, choice: "drift" },
+  placement: { probabilities: { bleed: 0.5, island: 0.3, horizon: 0.2 }, choice: "bleed" },
+  emptiness: { score: 0.5, confidence: 0.5, legend: { 0: "No reserved emptiness", 1: "A little breathing room", 2: "Generous emptiness", 3: "Mostly silence" }, probabilities: { 0: 0.5, 1: 0.5, 2: 0, 3: 0 } },
+  accent: { score: 0.5, confidence: 0.5, legend: { 0: "No accent", 1: "A few sparks", 2: "Bold counterpoint" }, probabilities: { 0: 0.5, 1: 0.5, 2: 0 } },
 };
 
 /** Plain words for a failed Jev call. */
@@ -108,28 +123,30 @@ function failureText(err) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function makePattern(name) {
-  const field = new Float32Array(renderer.cols * renderer.rows);
-  return { name, field, gen: PATTERNS[name](renderer.cols, renderer.rows, field, renderer.aspect), warm: WARM_STEPS };
-}
-
-function switchPattern(name) {
-  if (current?.name === name || next?.name === name) return;
-  next = makePattern(name);
-  fade = 0;
+function allocMasks() {
+  const n = renderer.cols * renderer.rows;
+  masks = { from: new Float32Array(n), to: new Float32Array(n), mixed: new Float32Array(n), figure: new Float32Array(n), ground: new Float32Array(n) };
 }
 
 /** Rebuild the grid after a size or budget change; the picture restarts, so this is kept rare. */
 function rebuildGrid() {
-  current = makePattern(current.name);
-  next = null;
-  blend = new Float32Array(renderer.cols * renderer.rows);
+  figure.rebuild(renderer.cols, renderer.rows, renderer.aspect);
+  ground.rebuild(renderer.cols, renderer.rows, renderer.aspect);
+  allocMasks();
 }
 
-/** The HUD takes its accent from the palette Jev chose: the chrome obeys the art director too. */
+/** The HUD takes its accent from the palette Jev chose, and turns to ink on paper for paper palettes. */
 function setAccent(palette) {
-  const [r, g, b] = PALETTES[palette][10];
+  const p = PALETTES[palette] ?? PALETTES.bone;
+  const [r, g, b] = p.levels[10];
   document.documentElement.style.setProperty("--accent", `${r | 0}, ${g | 0}, ${b | 0}`);
+  if (p.paper) document.documentElement.dataset.paper = "1";
+  else delete document.documentElement.dataset.paper;
+}
+
+/** The ground is an under-painting: a quiet family, never the same as the figure's. */
+function groundFamily(figureFamily) {
+  return figureFamily === "dots" ? "braille" : "dots";
 }
 
 /** Roll one option from Jev's distribution: the randomness is Jev's own probabilities. */
@@ -145,6 +162,14 @@ function roll(probabilities) {
 
 function scoreUnit(answer) {
   return answer.score / (Object.keys(answer.legend).length - 1);
+}
+
+/** Piecewise-linear lookup of a per-level table by a Score's expectation. */
+function byScore(table, answer) {
+  const s = Math.max(0, Math.min(table.length - 1, answer.score));
+  const i = Math.floor(s);
+  const k = s - i;
+  return i + 1 < table.length ? table[i] + (table[i + 1] - table[i]) * k : table[i];
 }
 
 function localTime() {
@@ -173,7 +198,7 @@ async function postJudge(payload) {
   return body;
 }
 
-/** The scene: picture, glyphs, colour, motion. Rolled from Jev's odds every cadence. */
+/** The scene: figure, ground, glyphs, colour, motion, placement, emptiness, accent. Rolled from Jev's odds. */
 async function judgeTaste() {
   if (tasteInFlight) return;
   const sound = ear.describe(TASTE_WINDOW_S);
@@ -184,7 +209,7 @@ async function judgeTaste() {
   }
   tasteInFlight = true;
   ledger.say("Asking Jev for the next picture…", "wait");
-  const cadenceMs = Number(cadenceInput.value) * 1000;
+  const holdMs = Number(holdInput.value) * 1000;
   try {
     // With the live loop off, the pulse questions ride along on this call instead.
     const body = await postJudge({ sound, set: liveInput.checked ? "taste" : "all", note: noteInput.value, local_time: localTime() });
@@ -193,11 +218,13 @@ async function judgeTaste() {
     applyTaste(body);
     if (body.answers.density) applyPulse(body);
     ledger.say("");
-    nextTasteAt = performance.now() + cadenceMs;
+    sceneSound = sound;
+    lastSceneAt = performance.now();
+    nextTasteAt = lastSceneAt + holdMs;
   } catch (err) {
     // Keep the show moving: roll again from Jev's last odds (or the starter set) and retry later.
     tasteFailures += 1;
-    const wait = Math.min(MAX_BACKOFF_MS, cadenceMs * 2 ** tasteFailures);
+    const wait = Math.min(MAX_BACKOFF_MS, 6000 * 2 ** tasteFailures);
     const replay = lastTaste ?? { answers: STARTER_TASTE, state: { sound, listener_note: "(none)" }, replayed: true };
     applyTaste({ ...replay, replayed: true });
     ledger.say(`${failureText(err)} — re-rolling ${lastTaste ? "its last odds" : "a starter set"}; retrying in ${Math.round(wait / 1000)} s`, "error");
@@ -211,22 +238,33 @@ function applyTaste(body) {
   const { answers } = body;
   const rolled = {
     pattern: roll(answers.pattern.probabilities),
+    ground: roll(answers.ground.probabilities),
     glyphs: roll(answers.glyphs.probabilities),
     palette: roll(answers.palette.probabilities),
     motion: roll(answers.motion.probabilities),
+    placement: roll(answers.placement.probabilities),
   };
-  switchPattern(rolled.pattern);
-  renderer.setLook(rolled.glyphs, rolled.palette);
+  figure.switchTo(rolled.pattern);
+  ground.switchTo(rolled.ground === rolled.pattern ? "none" : rolled.ground); // a ground identical to the figure adds nothing
+  renderer.setLook(figureLook, rolled.glyphs, rolled.palette);
+  renderer.setLook(groundLook, groundFamily(rolled.glyphs), rolled.palette);
   setAccent(rolled.palette);
   if (rolled.motion !== motions.to) {
     motions.from = motions.to;
     motions.to = rolled.motion;
     motions.mix = 0;
   }
+  if (rolled.placement !== placement.to) {
+    placement.from = placement.to;
+    placement.to = rolled.placement;
+    placement.mix = 0;
+  }
+  targets.emptiness = scoreUnit(answers.emptiness);
+  targets.accent = byScore(ACCENT_SHARE, answers.accent);
   ledger.showTaste({ ...body, rolled });
 }
 
-/** The feel: fill, order, arc, drop-soon. The next call fires as soon as the previous one returns. */
+/** The feel: fill, order, arc, drop-soon, turned. The next call fires as soon as the previous one returns. */
 async function pulseLoop() {
   if (pulseRunning) return;
   pulseRunning = true;
@@ -238,7 +276,7 @@ async function pulseLoop() {
     }
     const started = performance.now();
     try {
-      applyPulse(await postJudge({ sound, set: "pulse" }));
+      applyPulse(await postJudge({ sound, set: "pulse", before: sceneSound ?? undefined }));
       pulseFailures = 0;
     } catch (err) {
       pulseFailures += 1;
@@ -258,6 +296,8 @@ function applyPulse(body) {
   targets.turbulence = scoreUnit(answers.turbulence);
   targets.arc = scoreUnit(answers.arc);
   params.drop = answers.drop_soon.noul;
+  // The music turned: end the scene early, once the current picture has had a moment to be seen.
+  if (answers.turned && answers.turned.noul >= TURN_MIN && performance.now() - lastSceneAt >= MIN_HOLD_MS && !tasteInFlight) nextTasteAt = 0;
   ledger.showPulse(body);
 }
 
@@ -306,26 +346,28 @@ function checkDropRelease(live, now) {
   }
 }
 
-/** Advance the current picture and, if one is queued, warm it up then cross over to it. */
-function stepPatterns(dt, t, live, frozen) {
-  if (!frozen) current.gen.step(dt, t, live, params);
-  if (!next) return current.field;
-  if (next.warm > 0) {
-    // Let rain, embers, particles and cells populate off-screen before they fade in: one coarse step per frame.
-    next.warm--;
-    next.gen.step(WARM_DT, t - next.warm * WARM_DT, live, params);
-    return current.field;
-  }
-  if (!frozen) next.gen.step(dt, t, live, params);
-  fade = Math.min(1, fade + dt / CROSSFADE_S);
-  const k = fade * fade * (3 - 2 * fade); // ease in-out
-  for (let i = 0; i < blend.length; i++) blend[i] = current.field[i] * (1 - k) + next.field[i] * k;
-  if (fade >= 1) {
-    current = next;
-    next = null;
-    return current.field;
-  }
-  return blend;
+/** The composition mask for this frame: Jev's placement, crossfaded, weighted by its emptiness. */
+function currentMask(dt, t) {
+  placement.mix = Math.min(1, placement.mix + dt / CROSSFADE_S);
+  makeMask(placement.to, renderer.cols, renderer.rows, renderer.aspect, t, masks.to);
+  if (placement.mix >= 1) return masks.to;
+  makeMask(placement.from, renderer.cols, renderer.rows, renderer.aspect, t, masks.from);
+  mixMasks(masks.from, masks.to, placement.mix, masks.mixed);
+  return masks.mixed;
+}
+
+/** Both layers for this frame: figure over ground, each composed by the mask. */
+function composeLayers(dt, t, live, frozen) {
+  Object.assign(groundParams, params, { density: params.density * 0.6, speed: params.speed * 0.6 });
+  const figureField = figure.step(dt, t, live, params, frozen);
+  const groundField = ground.step(dt, t, live, groundParams, frozen);
+  const mask = currentMask(dt, t);
+  applyMask(figureField, mask, params.emptiness, masks.figure);
+  applyMask(groundField, mask, params.emptiness * 0.6, masks.ground);
+  return [
+    { field: masks.ground, look: groundLook, gain: lastGain * GROUND_GAIN, accent: 0 },
+    { field: masks.figure, look: figureLook, gain: lastGain, accent: params.accent },
+  ];
 }
 
 function downloadBlob(blob, name) {
@@ -338,11 +380,11 @@ function downloadBlob(blob, name) {
 
 /** Download the frame on screen right now as a high-resolution PNG of the art alone. */
 function saveFrame() {
-  if (!lastField) return;
+  if (!lastLayers) return;
   const when = new Date();
   const pad = (n) => String(n).padStart(2, "0");
   const stamp = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}-${pad(when.getHours())}${pad(when.getMinutes())}${pad(when.getSeconds())}`;
-  const out = renderer.exportFrame(lastField, lastGain);
+  const out = renderer.exportFrame(lastLayers);
   out.toBlob(async (blob) => {
     if (!blob) {
       ledger.say("Could not export the frame (canvas too large for this browser).", "error");
@@ -366,7 +408,7 @@ function saveFrame() {
 function govern(now) {
   if (GOVERNOR_OFF || now < nextGovernorAt) return;
   nextGovernorAt = now + GOVERNOR_INTERVAL_MS;
-  if (document.hidden || next || renderer.budget <= GOVERNOR_MIN_CELLS) return; // transitions double the work briefly
+  if (document.hidden || figure.transitioning || ground.transitioning || renderer.budget <= GOVERNOR_MIN_CELLS) return; // transitions double the work briefly
   const slow = workMs > GOVERNOR_WORK_MS || fps < GOVERNOR_MIN_FPS;
   governorStrikes = slow ? governorStrikes + 1 : 0;
   if (governorStrikes < GOVERNOR_STRIKES) return;
@@ -385,16 +427,15 @@ function frame(now) {
   const work0 = performance.now();
   const live = ear.frame(now);
 
-  for (const k of Object.keys(targets)) params[k] += (targets[k] - params[k]) * Math.min(1, dt / PULSE_EASE_S);
+  for (const k of ["density", "turbulence", "arc"]) params[k] += (targets[k] - params[k]) * Math.min(1, dt / PULSE_EASE_S);
+  for (const k of ["emptiness", "accent"]) params[k] += (targets[k] - params[k]) * Math.min(1, dt / SCENE_EASE_S);
   const frozen = updateMotion(dt, t, live);
-  const field = stepPatterns(dt, t, live, frozen);
-
   checkDropRelease(live, now);
   flash *= Math.exp(-dt * FLASH_DECAY);
   const charge = Math.max(0, Math.min(1, (params.drop - 0.4) / 0.4));
   lastGain = ARC_GAIN_MIN + (ARC_GAIN_MAX - ARC_GAIN_MIN) * params.arc + DROP_SHIMMER * charge * beatEnv;
-  renderer.draw(field, dt, flash, lastGain);
-  lastField = field;
+  lastLayers = composeLayers(dt, t, live, frozen);
+  renderer.draw(lastLayers, dt, flash);
   workMs += (performance.now() - work0 - workMs) * 0.05;
 
   if (now >= nextStatusAt) {
@@ -419,8 +460,8 @@ function idleFrame(now) {
   const t = now / 1000;
   const live = { energy: 0.35 + 0.15 * Math.sin(t * 0.7), bass: 0.2, beat: 0, bpm: 0, silent: true };
   params.speed = 0.4;
-  current.gen.step(dt, t, live, params);
-  renderer.draw(current.field, dt, 0);
+  const field = figure.step(dt, t, live, params);
+  renderer.draw([{ field, look: figureLook, gain: 1, accent: 0 }], dt, 0);
 }
 
 async function start(source) {
@@ -438,22 +479,20 @@ async function start(source) {
   if (phoneLayout()) ledgerEl.classList.add("is-collapsed");
   const health = await fetch("/api/health").then((r) => r.json()).catch(() => ({ hasKey: false }));
   if (!health.hasKey) ledger.say("TYPESAFE_API_KEY is not set on the server. Add it to .env and restart.", "error");
-  blend = new Float32Array(renderer.cols * renderer.rows);
   startedAt = performance.now();
   lastFrame = startedAt;
+  lastSceneAt = startedAt;
   nextTasteAt = startedAt + 2500;
   nextGovernorAt = startedAt + 4000;
   requestAnimationFrame(frame);
   pulseLoop();
 }
 
-current = makePattern("embers");
-current.warm = 0;
+allocMasks();
 params.density = 0.25;
 setAccent("bone");
 document.fonts.ready.then(() => renderer.resize()).finally(() => {
-  current = makePattern("embers");
-  current.warm = 0;
+  rebuildGrid();
   requestAnimationFrame(idleFrame);
 });
 
@@ -468,10 +507,10 @@ document.getElementById("ledger-head").addEventListener("click", (e) => {
 });
 document.getElementById("ledger-show").addEventListener("click", () => ledgerEl.classList.remove("is-hidden"));
 document.getElementById("save-frame").addEventListener("click", saveFrame);
-cadenceInput.value = DEFAULT_CADENCE_S;
-cadenceLabel.textContent = `${DEFAULT_CADENCE_S} s`;
-cadenceInput.addEventListener("input", () => {
-  cadenceLabel.textContent = `${cadenceInput.value} s`;
+holdInput.value = DEFAULT_HOLD_S;
+holdLabel.textContent = `${DEFAULT_HOLD_S} s`;
+holdInput.addEventListener("input", () => {
+  holdLabel.textContent = `${holdInput.value} s`;
 });
 liveInput.addEventListener("change", () => {
   if (liveInput.checked && startedAt) pulseLoop();
@@ -481,7 +520,7 @@ window.addEventListener("resize", () => {
   resizeTimer = setTimeout(() => {
     const { cols, rows } = renderer;
     renderer.resize();
-    if (current && (cols !== renderer.cols || rows !== renderer.rows)) rebuildGrid();
+    if (cols !== renderer.cols || rows !== renderer.rows) rebuildGrid();
   }, RESIZE_DEBOUNCE_MS);
 });
 noteInput.addEventListener("keydown", (e) => {

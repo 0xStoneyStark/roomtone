@@ -1,7 +1,10 @@
-// Draws a 0..1 field as coloured glyphs on a canvas. Every glyph × colour level
-// is rasterised once into an atlas, so a frame is one drawImage per lit cell
-// instead of a fillText. Glyph families and palettes are keyed by the option
-// names Jev chooses between (questions.mjs).
+// Draws a 0..1 field as coloured glyphs on a canvas. Every glyph × colour level (plus one
+// accent row) is rasterised once into an atlas, so a frame is one drawImage per lit cell
+// instead of a fillText. Glyph families and palettes are keyed by the option names Jev
+// chooses between (questions.mjs). Several layers (ground, figure, ...) can be drawn in one
+// frame, each with its own crossfading "look" (glyph family + palette), gain and accent share.
+import { PALETTES, LEVELS } from "./palettes.js";
+import { orientations, cellHash } from "./marks.js";
 
 const MIN_FONT_PX = 8; // phones: small glyphs read as texture, and exports re-rasterise them large
 const MAX_FONT_PX = 34;
@@ -9,15 +12,20 @@ export const MAX_CELLS = 7000;
 const MAX_DPR = 1.5;
 const LINE_HEIGHT = 1.25;
 const CHAR_ASPECT = 0.6; // IBM Plex Mono advance width / font size
-const LEVELS = 16; // colour quantisation steps per palette
 const LOOK_FADE_S = 2.2; // glyph family + palette crossfade, matched to the pattern crossfade
 const GAMMA = 0.7; // lifts mid-brightness cells so faint structure stays legible
 const EXPORT_MAX_PIXELS = 15.5e6; // just under iOS Safari's 16.78 MP canvas ceiling; desktops allow far more
 const EXPORT_MAX_EDGE = 8192;
 const FONT_FAMILY = `"IBM Plex Mono", "Cascadia Mono", Consolas, monospace`;
 
+// Glyph families whose entries above 0 are { h, v, d1, d2 } instead of a plain glyph/variant
+// list: the mark's orientation follows the direction of the field (see marks.js).
+const DIRECTIONAL_FAMILIES = new Set(["strokes", "hatching"]);
+const ORIENTATION_KEYS = ["h", "v", "d1", "d2"]; // index matches marks.js orientation codes 0-3
+
 // Level 0 is always blank. An array entry means "pick one by cell", for families
-// that read better as varied characters than as a weight ramp.
+// that read better as varied characters than as a weight ramp. A directional family's
+// entries above 0 are { h, v, d1, d2 }, each itself a glyph or an array of variants.
 export const GLYPH_RAMPS = {
   blocks: [" ", "░", "▒", "▓", "█"],
   dots: [" ", "·", "∙", "•", "●"],
@@ -26,54 +34,37 @@ export const GLYPH_RAMPS = {
   katakana: [" ", ["ｰ", "ｲ", "ｸ"], ["ｼ", "ﾂ", "ﾆ"], ["ﾊ", "ﾐ", "ﾋ"], ["ｳ", "ﾓ", "ﾅ"], ["ﾎ", "ﾜ", "ﾒ"], ["ｹ", "ﾏ", "ｻ"]],
   symbols: [" ", "·", "∘", "∴", "∷", "≡", "≈", "∞", "◊"],
   classic: [" ", ".", ":", "-", "=", "+", "*", "#", "%", "@"],
+  strokes: [
+    " ",
+    { h: "╌", v: "┊", d1: "╱", d2: "╲" },
+    { h: "─", v: "│", d1: "╱", d2: "╲" },
+    { h: "━", v: "┃", d1: "╱", d2: "╲" },
+    { h: "═", v: "║", d1: "╱", d2: "╲" },
+  ],
+  hatching: [
+    " ",
+    { h: "-", v: "|", d1: "/", d2: "\\" },
+    { h: "=", v: "|", d1: "/", d2: "\\" },
+    { h: "≡", v: "‖", d1: "/", d2: "\\" },
+    { h: "#", v: "#", d1: "#", d2: "#" },
+  ],
 };
 
-// Three HSL stops (dark → mid → bright) per colour mood.
-const PALETTE_STOPS = {
-  ember: [[0, 80, 28], [18, 95, 50], [45, 100, 78]],
-  glacier: [[225, 70, 34], [200, 90, 55], [190, 40, 95]],
-  phosphor: [[130, 80, 24], [130, 90, 48], [110, 100, 82]],
-  violet: [[260, 70, 36], [300, 85, 55], [330, 100, 80]],
-  acid: [[80, 90, 30], [72, 100, 50], [55, 100, 82]],
-  dusk: [[290, 40, 32], [345, 60, 58], [25, 90, 82]],
-  bone: [[40, 12, 30], [40, 15, 58], [45, 25, 94]],
-  blood: [[350, 85, 22], [355, 95, 42], [0, 100, 64]],
-};
+// Re-exported so existing imports of PALETTES from render.js keep working; palettes.js owns the data.
+export { PALETTES };
 
-function hslToRgb(h, s, l) {
-  s /= 100;
-  l /= 100;
-  const k = (n) => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
-  return [f(0) * 255, f(8) * 255, f(4) * 255];
+function normalizeLook(glyphs, palette) {
+  return { glyphs: GLYPH_RAMPS[glyphs] ? glyphs : "classic", palette: PALETTES[palette] ? palette : "bone" };
 }
 
-function buildPalette(stops) {
-  const out = [];
-  for (let i = 0; i < LEVELS; i++) {
-    const v = i / (LEVELS - 1);
-    const seg = v < 0.5 ? 0 : 1;
-    const k = (v - seg * 0.5) * 2;
-    const a = stops[seg], b = stops[seg + 1];
-    out.push(hslToRgb(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k));
-  }
-  return out;
-}
-
-export const PALETTES = Object.fromEntries(Object.entries(PALETTE_STOPS).map(([k, s]) => [k, buildPalette(s)]));
-
-function cellHash(x, y) {
-  return ((x * 73856093) ^ (y * 19349663)) >>> 0;
-}
-
-/** For a ramp, the glyph variants shown at each of the LEVELS colour steps. */
-function variantsPerLevel(ramp) {
+/** The ramp entry for one of the LEVELS colour steps, skipping the blank glyph at index 0. */
+function levelEntry(ramp, level) {
   const top = ramp.length - 1;
-  return Array.from({ length: LEVELS }, (_, level) => {
-    const entry = ramp[Math.max(1, Math.round((level / (LEVELS - 1)) * top))];
-    return Array.isArray(entry) ? entry : [entry];
-  });
+  return ramp[Math.max(1, Math.round((level / (LEVELS - 1)) * top))];
+}
+
+function asVariants(entry) {
+  return Array.isArray(entry) ? entry : [entry];
 }
 
 export class AsciiRenderer {
@@ -81,10 +72,8 @@ export class AsciiRenderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d", { alpha: false });
     this.budget = budget;
-    this.lookFrom = { glyphs: "dots", palette: "bone" };
-    this.lookTo = { glyphs: "dots", palette: "bone" };
-    this.lookMix = 1;
     this.atlases = new Map();
+    this.orientBufs = new Map(); // per-look orientation buffer, for directional glyph families
     this.resize();
   }
 
@@ -121,36 +110,75 @@ export class AsciiRenderer {
     this.colX = Float32Array.from({ length: this.cols }, (_, x) => offsetX + x * this.cellW);
     this.rowY = Float32Array.from({ length: this.rows }, (_, y) => offsetY + y * this.cellH);
     this.atlases.clear();
+    this.orientBufs.clear();
   }
 
-  /** Crossfade from the current glyph family + palette to a new pair. */
-  setLook(glyphs, palette) {
-    const to = { glyphs: GLYPH_RAMPS[glyphs] ? glyphs : "classic", palette: PALETTES[palette] ? palette : "bone" };
-    if (to.glyphs === this.lookTo.glyphs && to.palette === this.lookTo.palette) return;
+  /** A fresh look, already "settled" (mix 1) on the given glyph family + palette. */
+  createLook(glyphs = "dots", palette = "bone") {
+    const look = normalizeLook(glyphs, palette);
+    return { from: { ...look }, to: { ...look }, mix: 1 };
+  }
+
+  /** Crossfade a look to a new glyph family + palette pair. */
+  setLook(look, glyphs, palette) {
+    const to = normalizeLook(glyphs, palette);
+    if (to.glyphs === look.to.glyphs && to.palette === look.to.palette) return;
     // Snap any fade in progress to its destination rather than blending three looks.
-    this.lookFrom = this.lookTo;
-    this.lookTo = to;
-    this.lookMix = 0;
+    look.from = look.to;
+    look.to = to;
+    look.mix = 0;
+  }
+
+  /** Advances one look's crossfade; called once per layer per frame from draw(). */
+  advance(look, dt) {
+    look.mix = Math.min(1, look.mix + dt / LOOK_FADE_S);
+  }
+
+  /** The target palette object of a look, e.g. for the caller's bg/paper decisions. */
+  paletteOf(look) {
+    return PALETTES[look?.to?.palette] ?? PALETTES.bone;
+  }
+
+  /** The canvas ground for a look mid-fade: black to paper (or back) over the same crossfade as the marks. */
+  groundOf(look) {
+    const to = this.paletteOf(look).bg;
+    if (!look || look.mix >= 1) return to;
+    const from = (PALETTES[look.from.palette] ?? PALETTES.bone).bg;
+    const k = look.mix;
+    return [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k, from[2] + (to[2] - from[2]) * k];
   }
 
   /**
-   * One rasterised tile per (colour level, glyph variant), cached per family × palette × font size.
-   * `geo` describes the tile grid; it defaults to the screen's, and exports pass a larger one.
+   * One rasterised tile per (colour level, glyph orientation, glyph variant), plus one extra
+   * accent row reusing the top level's glyphs in the palette's accent colour. Cached per
+   * family × palette × font size. `geo` describes the tile grid; it defaults to the screen's,
+   * and exports pass a larger one.
    */
   atlas({ glyphs: family, palette: paletteName }, geo = this) {
     const key = `${family}|${paletteName}|${geo.fontPx}|${geo.dpr}`;
     let atlas = this.atlases.get(key);
     if (atlas) return atlas;
-    const variants = variantsPerLevel(GLYPH_RAMPS[family]);
+    const ramp = GLYPH_RAMPS[family];
+    const directional = DIRECTIONAL_FAMILIES.has(family);
+    const orientCount = directional ? ORIENTATION_KEYS.length : 1;
     const palette = PALETTES[paletteName];
     const { dpr, tileW, tileH, fontPx } = geo;
-    const slotBase = new Int32Array(LEVELS);
-    const slotCount = new Int32Array(LEVELS);
+    const rowCount = LEVELS + 1; // + accent row
+    const slotBase = new Int32Array(rowCount * orientCount);
+    const slotCount = new Int32Array(rowCount * orientCount);
+    const draws = []; // { slot, ch, color }, painted once the canvas is sized
     let slots = 0;
-    for (let level = 0; level < LEVELS; level++) {
-      slotBase[level] = slots;
-      slotCount[level] = variants[level].length;
-      slots += variants[level].length;
+    for (let level = 0; level < rowCount; level++) {
+      const entry = levelEntry(ramp, level < LEVELS ? level : LEVELS - 1);
+      const color = level < LEVELS ? palette.levels[level] : palette.accent;
+      for (let o = 0; o < orientCount; o++) {
+        const variants = asVariants(directional ? entry[ORIENTATION_KEYS[o]] : entry);
+        const idx = level * orientCount + o;
+        slotBase[idx] = slots;
+        slotCount[idx] = variants.length;
+        variants.forEach((ch, i) => draws.push({ slot: slots + i, ch, color }));
+        slots += variants.length;
+      }
     }
     const canvas = document.createElement("canvas");
     canvas.width = tileW * slots;
@@ -159,19 +187,24 @@ export class AsciiRenderer {
     g.scale(dpr, dpr);
     g.font = `${fontPx}px ${FONT_FAMILY}`;
     g.textBaseline = "top";
-    for (let level = 0; level < LEVELS; level++) {
-      const [r, gr, b] = palette[level];
+    for (const { slot, ch, color } of draws) {
+      const [r, gr, b] = color;
       g.fillStyle = `rgb(${r | 0},${gr | 0},${b | 0})`;
-      variants[level].forEach((ch, i) => g.fillText(ch, ((slotBase[level] + i) * tileW) / dpr, 0));
+      g.fillText(ch, (slot * tileW) / dpr, 0);
     }
-    atlas = { canvas, slotBase, slotCount };
+    atlas = { canvas, slotBase, slotCount, orientCount };
     this.atlases.set(key, atlas);
     return atlas;
   }
 
-  pass(field, atlas, alpha, ctx = this.ctx, geo = this, gain = 1) {
+  /**
+   * One glyph per lit cell, drawn from a pre-rasterised atlas. `orientBuf`, when the family is
+   * directional, picks the glyph's orientation per cell. `accent` is the share of the
+   * brightest cells (v >= 0.9) that use the palette's accent colour instead of the ramp.
+   */
+  pass(field, atlas, alpha, ctx, geo, gain, orientBuf, accent) {
     const { cols, cellW, cellH, tileW, tileH, colX, rowY } = geo;
-    const { canvas, slotBase, slotCount } = atlas;
+    const { canvas, slotBase, slotCount, orientCount } = atlas;
     ctx.globalAlpha = alpha;
     for (let i = 0, x = 0, y = 0; i < field.length; i++, x++) {
       if (x === cols) {
@@ -180,28 +213,48 @@ export class AsciiRenderer {
       }
       const v = field[i] * gain;
       if (v < 0.04) continue;
-      const level = Math.min(LEVELS - 1, Math.floor(v ** GAMMA * LEVELS));
-      const slot = slotBase[level] + (slotCount[level] > 1 ? cellHash(x, y) % slotCount[level] : 0);
+      const accented = accent > 0 && v >= 0.9 && cellHash(x, y) % 1000 < accent * 1000;
+      const level = accented ? LEVELS : Math.min(LEVELS - 1, Math.floor(v ** GAMMA * LEVELS));
+      const orient = orientCount > 1 ? orientBuf[i] : 0;
+      const idx = level * orientCount + orient;
+      const base = slotBase[idx], count = slotCount[idx];
+      const slot = base + (count > 1 ? cellHash(x, y) % count : 0);
       ctx.drawImage(canvas, slot * tileW, 0, tileW, tileH, colX[x], rowY[y], cellW, cellH);
     }
     ctx.globalAlpha = 1;
   }
 
-  /**
-   * The field as glyphs, with the current look (or the two looks mid-fade), onto any context/grid.
-   * `gain` scales brightness before quantisation: Jev's energy arc and drop charge come in here.
-   */
-  paint(field, ctx, geo, gain = 1) {
-    ctx.fillStyle = "#060607";
-    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-    if (this.lookMix < 1) this.pass(field, this.atlas(this.lookFrom, geo), 1 - this.lookMix, ctx, geo, gain);
-    this.pass(field, this.atlas(this.lookTo, geo), this.lookMix < 1 ? this.lookMix : 1, ctx, geo, gain);
+  /** The cached orientation buffer for one layer's look, recomputed every call and resized with the grid. */
+  orientationsFor(look, field) {
+    const size = this.cols * this.rows;
+    let buf = this.orientBufs.get(look);
+    if (!buf || buf.length !== size) {
+      buf = new Uint8Array(size);
+      this.orientBufs.set(look, buf);
+    }
+    orientations(field, this.cols, this.rows, this.aspect, buf);
+    return buf;
   }
 
-  /** `flash` 0..1 washes the whole frame toward white (used for the drop release). */
-  draw(field, dt, flash = 0, gain = 1) {
-    this.lookMix = Math.min(1, this.lookMix + dt / LOOK_FADE_S);
-    this.paint(field, this.ctx, this, gain);
+  /** One layer's field, with its look (or its two looks mid-fade), onto any context/grid. */
+  paintLayer({ field, look, gain = 1, accent = 0 }, ctx, geo) {
+    const directional = DIRECTIONAL_FAMILIES.has(look.from.glyphs) || DIRECTIONAL_FAMILIES.has(look.to.glyphs);
+    const orientBuf = directional ? this.orientationsFor(look, field) : null;
+    if (look.mix < 1) this.pass(field, this.atlas(look.from, geo), 1 - look.mix, ctx, geo, gain, orientBuf, accent);
+    this.pass(field, this.atlas(look.to, geo), look.mix < 1 ? look.mix : 1, ctx, geo, gain, orientBuf, accent);
+  }
+
+  /**
+   * Advances every layer's look, clears to the top layer's target palette ground, then paints
+   * layers bottom → top (ground layers first, typically dimmer via a small gain). `flash` 0..1
+   * washes the whole frame toward white, used for the drop release.
+   */
+  draw(layers, dt, flash = 0) {
+    for (const layer of layers) this.advance(layer.look, dt);
+    const [br, bg, bb] = this.groundOf(layers.at(-1)?.look);
+    this.ctx.fillStyle = `rgb(${br | 0},${bg | 0},${bb | 0})`;
+    this.ctx.fillRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
+    for (const layer of layers) this.paintLayer(layer, this.ctx, this);
     if (flash > 0.01) {
       this.ctx.fillStyle = `rgba(255,250,240,${flash * 0.85})`;
       this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -209,10 +262,10 @@ export class AsciiRenderer {
   }
 
   /**
-   * The same grid re-rasterised at a much larger font size: a print-quality frame of only the art,
-   * no HUD, no flash. Sized to the biggest canvas that stays inside browser limits.
+   * The same layers re-rasterised at a much larger font size: a print-quality frame of only
+   * the art, no HUD, no flash. Sized to the biggest canvas that stays inside browser limits.
    */
-  exportFrame(field, gain = 1) {
+  exportFrame(layers) {
     const dpr = 1;
     const probe = document.createElement("canvas").getContext("2d");
     const baseW = this.cols * this.tileW, baseH = this.rows * this.tileH;
@@ -228,7 +281,7 @@ export class AsciiRenderer {
     // Tile rounding can push a near-limit export over the ceiling, where iOS silently draws nothing.
     const over = (this.cols * tileW * this.rows * tileH) / EXPORT_MAX_PIXELS;
     if (over > 1) {
-      fontPx = Math.floor(fontPx / Math.sqrt(over) * 0.995);
+      fontPx = Math.floor((fontPx / Math.sqrt(over)) * 0.995);
       measure();
     }
     const geo = {
@@ -241,7 +294,11 @@ export class AsciiRenderer {
     const out = document.createElement("canvas");
     out.width = this.cols * tileW;
     out.height = this.rows * tileH;
-    this.paint(field, out.getContext("2d"), geo, gain);
+    const ctx = out.getContext("2d");
+    const [br, bg, bb] = this.groundOf(layers.at(-1)?.look);
+    ctx.fillStyle = `rgb(${br | 0},${bg | 0},${bb | 0})`;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    for (const layer of layers) this.paintLayer(layer, ctx, geo);
     // Export atlases are large and one-off; drop them so the screen cache stays small.
     for (const key of this.atlases.keys()) if (key.endsWith(`|${fontPx}|${dpr}`)) this.atlases.delete(key);
     return out;

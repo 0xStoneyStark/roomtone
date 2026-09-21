@@ -68,10 +68,15 @@ export class Ledger {
     this.note.textContent = state.listener_note === "(none)" ? "" : `you said: ${state.listener_note}`;
     this.tasteRows.replaceChildren();
     this.rowIndex = 0;
-    this.choiceRows("picture", answers.pattern, rolled.pattern, 3);
-    this.choiceRows("glyphs", answers.glyphs, rolled.glyphs, 2);
-    this.choiceRows("colour", answers.palette, rolled.palette, 2);
-    this.choiceRows("motion", answers.motion, rolled.motion, 2);
+    // Defensive: older replays may carry a narrower answer set than the current question set.
+    if (answers.pattern) this.choiceRows("picture", answers.pattern, rolled.pattern, 3);
+    if (answers.ground) this.choiceRows("ground", answers.ground, rolled.ground, 2);
+    if (answers.glyphs) this.choiceRows("glyphs", answers.glyphs, rolled.glyphs, 2);
+    if (answers.palette) this.choiceRows("colour", answers.palette, rolled.palette, 2);
+    if (answers.motion) this.choiceRows("motion", answers.motion, rolled.motion, 2);
+    if (answers.placement) this.choiceRows("placement", answers.placement, rolled.placement, 2);
+    if (answers.emptiness) this.scoreRowOnce("emptiness", answers.emptiness);
+    if (answers.accent) this.scoreRowOnce("accent", answers.accent);
   }
 
   showPulse({ state, answers }) {
@@ -82,13 +87,22 @@ export class Ledger {
         turbulence: row("order", false, 5),
         arc: row("arc", false, 5),
         drop_soon: row("drop", false, 5),
+        turned: row("turned", false, 5),
       };
       this.pulseRows.replaceChildren(...Object.values(this.pulse).map((r) => r.node));
     }
-    this.scoreRow(this.pulse.density, answers.density);
-    this.scoreRow(this.pulse.turbulence, answers.turbulence);
-    this.scoreRow(this.pulse.arc, answers.arc);
-    this.noulRow(this.pulse.drop_soon, answers.drop_soon);
+    if (answers.density) this.scoreRow(this.pulse.density, answers.density);
+    if (answers.turbulence) this.scoreRow(this.pulse.turbulence, answers.turbulence);
+    if (answers.arc) this.scoreRow(this.pulse.arc, answers.arc);
+    if (answers.drop_soon) this.noulRow(this.pulse.drop_soon, answers.drop_soon);
+    if (answers.turned) this.noulRow(this.pulse.turned, answers.turned);
+  }
+
+  /** A score row in the taste ledger: built fresh each scene, unlike the persistent pulse rows. */
+  scoreRowOnce(label, answer) {
+    const r = row(label, false, 5, this.rowIndex++);
+    this.scoreRow(r, answer);
+    this.tasteRows.append(r.node);
   }
 
   choiceRows(label, answer, picked, count) {

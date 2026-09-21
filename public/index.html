@@ -40,9 +40,10 @@
     <div class="intro__rule" aria-hidden="true"></div>
     <p class="intro__lede">ASCII pictures, art-directed by Jev from the music around you.</p>
     <p class="intro__body">
-      Not a waveform. Every few seconds the last six seconds of sound are put into words — tempo, weight,
-      brightness, rhythm — and Jev, a decision model, answers eight questions about them: which picture,
-      which glyphs, which colours, how it should move. The next picture is rolled from Jev's own
+      Not a waveform. The sound around you is put into words — tempo, weight, brightness, rhythm — and
+      Jev, a decision model, answers thirteen questions about them: which picture and what lies beneath it,
+      which marks, which colours, where on the page and how much is left empty, how it should move, and
+      whether the music has turned enough for a new picture. Each scene is rolled from Jev's own
       probabilities, so the same song never plays the same way twice.
     </p>
     <div class="intro__actions">
@@ -81,13 +82,13 @@
       <div class="ledger__rows ledger__rows--pulse" data-pulse></div>
       <footer class="ledger__foot">
         <label class="cadence">
-          <span>new picture every</span>
-          <input id="cadence" type="range" min="3" max="20" step="1" />
-          <span id="cadence-label">6 s</span>
+          <span>hold a picture at most</span>
+          <input id="cadence" type="range" min="10" max="120" step="5" />
+          <span id="cadence-label">45 s</span>
         </label>
         <label class="live">
           <input id="live" type="checkbox" checked />
-          <span>live feel — fill, order, arc and drop-soon re-asked as fast as Jev answers (≈2/s)</span>
+          <span>live feel — fill, order, arc, drop-soon and "has the music turned" re-asked as fast as Jev answers (≈2/s); a turn ends the picture early</span>
         </label>
         <div class="ledger__actions">
           <button id="judge-now" class="button button--quiet button--small" type="button">New picture now</button>

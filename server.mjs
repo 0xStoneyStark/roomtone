@@ -139,8 +139,17 @@ function buildRequest(body) {
     if (!text) throw new Error(`sound.${key} must be a non-empty string`);
     sound[key] = text;
   }
+  // The pulse set may carry the description from when the current picture was chosen, so Jev can
+  // judge whether the music has turned since.
+  const before = {};
+  if (set === "pulse" && body.before && typeof body.before === "object") {
+    for (const key of SOUND_FIELDS.pulse) {
+      const text = cleanText(body.before[key], MAX_FIELD_CHARS);
+      if (text) before[key] = text;
+    }
+  }
   const state = set === "pulse"
-    ? { sound }
+    ? { sound, sound_at_last_picture: Object.keys(before).length ? before : "(same as now)" }
     : {
         sound,
         listener_note: cleanText(body.note, MAX_NOTE_CHARS) ?? "(none)",
