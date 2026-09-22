@@ -4,7 +4,7 @@ ASCII pictures, art-directed by [Jev](https://docs.typesafe.ai) from the music a
 
 Not a waveform. What the microphone hears is turned into words — tempo, loudness, bass,
 brightness, rhythm, texture, dynamics — and Jev (TypeSafe's System One decision model)
-answers fourteen questions about them, on two clocks:
+answers sixteen questions about them, on two clocks:
 
 **Taste** — the scene, judged over the last six seconds whenever the music turns or the hold runs out (slider, default 45 s):
 

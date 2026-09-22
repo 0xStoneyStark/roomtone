@@ -30,6 +30,27 @@ export const PATTERNS = {
   glitch: "Torn horizontal bands of static that shear sideways on every hit. Feels like: aggressive, distorted, chaotic, industrial, heavy, noise.",
   ripple: "Concentric rings spreading from the spots where beats land, like drops on water. Feels like: percussive, sparse, playful, swing, hip-hop, jazz.",
   embers: "A few slow sparks rising and fading in darkness. Feels like: quiet, intimate, ambient, sad, late-night, a solo voice or instrument.",
+  solid: "One abstract three-dimensional object, turning and shaded alone at the centre of the screen — a single sculpted form, not a field of texture. Feels like: focused, deliberate, a single voice or instrument with real physical presence.",
+};
+
+// The solid's character, when `pattern` rolls to `solid`: a word maps onto the numbers of the
+// parametric equation that draws the object, so these six are a character each music might want,
+// not shapes picked off a shelf — the range underneath is continuous and infinite.
+export const FORMS = {
+  smooth: "Rounded, continuous, no hard edges anywhere. For music that flows without interruption: legato, consonant, at ease with itself.",
+  swollen: "Bulging, overfull, pressed outward from within. For music that feels thick and saturated, pushed past comfortable into a rounded, heavy fullness.",
+  spiky: "Covered in sharp radiating points. For music that stabs and jabs: sudden transients, staccato hits, sharp and percussive.",
+  bladed: "Flat, cutting planes and clean edges. For music that cuts rather than hits: precise, incisive, edged, deliberate.",
+  twisted: "A spiralling, torqued form wound around itself. For music under tension: modulating, restless, wound tight and turning.",
+  hollow: "An emptied-out shell with a void at its centre. For music with a hole in the middle: sparse, reverberant, spacious, unresolved.",
+};
+
+// How the solid's surface is drawn, independent of its shape.
+export const SHADINGS = {
+  lit: "Solid faces shaded by a light source, bright where they face it and dark where they turn away. For music with clear, grounded, definite presence.",
+  wireframe: "Only the edges drawn, the faces left open — a skeleton of lines describing the form without filling it in. For music that feels transparent, exposed, structural.",
+  points: "The surface built from scattered points rather than solid faces or lines. For music that feels granular, particulate, texture over tone.",
+  dissolving: "The form flickering at its edges, breaking between solid and scatter, never fully holding together. For music that feels unstable, decaying, coming apart.",
 };
 
 // The ground: an optional slow layer behind the figure, drawn dimmer and in a quieter glyph family.
@@ -136,6 +157,18 @@ export const TASTE_QUESTIONS = {
   pattern: choice(
     { context: CONTEXT, question: "Which moving ASCII figure, the foreground picture, best fits the music in `sound`, taking `listener_note` into account when it says what is playing or where the listener is, following `listener_direction` where it can apply, and not repeating anything in `already_rejected` unless the music really calls for it?" },
     PATTERNS,
+  ),
+  // `form` and `shading` only matter when `pattern` rolls to `solid`, but they are asked on every
+  // taste call anyway: independent questions over the same state run in parallel in one request,
+  // so asking speculatively costs one round trip rather than a second one fired only after the
+  // roll lands on `solid`. Code simply ignores these two answers the rest of the time.
+  form: choice(
+    { context: CONTEXT, question: "If the figure turns out to be `solid`, what character should the turning object have — a felt quality of the music in `sound`, not a literal shape — following `listener_direction` where it can apply?" },
+    FORMS,
+  ),
+  shading: choice(
+    { context: CONTEXT, question: "If the figure turns out to be `solid`, how should its surface be drawn, to match the music in `sound`, following `listener_direction` where it can apply?" },
+    SHADINGS,
   ),
   ground: choice(
     { context: CONTEXT, question: "Which slow background layer, if any, should sit behind the figure for the music in `sound`?" },

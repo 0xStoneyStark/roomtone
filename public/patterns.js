@@ -1,8 +1,10 @@
-// The nine pictures Jev can choose between. Each returns { step(dt, t, live, p) }
+// The ten pictures Jev can choose between. Each returns { step(dt, t, live, p) }
 // and writes brightness values 0..1 into `field` (cols × rows, row-major).
 //   live: { energy, bass, beat, bpm }        – per-frame numbers from the ear
 //   p:    { density, turbulence, arc, drop, speed } – Jev's judgments as 0..1 plus the motion envelope
 // `aspect` is cell height / cell width so circles look round in glyph space.
+
+import { solid } from "./solid.js";
 
 const TAU = Math.PI * 2;
 
@@ -296,4 +298,4 @@ export function embers(cols, rows, field) {
   };
 }
 
-export const PATTERNS = { rain, life, flow, plasma, tunnel, lattice, glitch, ripple, embers };
+export const PATTERNS = { rain, life, flow, plasma, tunnel, lattice, glitch, ripple, embers, solid };

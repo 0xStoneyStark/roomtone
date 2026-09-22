@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   CAMERAS,
+  FORMS as FORM_OPTIONS,
   GLYPHS,
   GROUNDS,
   MOTIONS,
@@ -12,6 +13,7 @@ import {
   PATTERNS as PATTERN_OPTIONS,
   PLACEMENTS as PLACEMENT_OPTIONS,
   QUESTION_SETS,
+  SHADINGS as SHADING_OPTIONS,
   SOUND_FIELDS,
 } from "../questions.mjs";
 import { PATTERNS } from "../public/patterns.js";
@@ -19,6 +21,7 @@ import { GLYPH_RAMPS } from "../public/render.js";
 import { PALETTES } from "../public/palettes.js";
 import { PLACEMENTS } from "../public/composition.js";
 import { MOVES } from "../public/camera.js";
+import { FORMS, SHADINGS } from "../public/solid.js";
 
 const appSource = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 
@@ -61,6 +64,14 @@ test("every placement Jev can choose is a composition placement", () => {
   assert.deepEqual(Object.keys(PLACEMENT_OPTIONS), PLACEMENTS);
 });
 
+test("every form Jev can choose maps onto solid.js's FORMS, in order", () => {
+  assert.deepEqual(Object.keys(FORM_OPTIONS), Object.keys(FORMS));
+});
+
+test("every shading Jev can choose matches solid.js's SHADINGS, in order", () => {
+  assert.deepEqual(Object.keys(SHADING_OPTIONS), SHADINGS);
+});
+
 test("every motion Jev can choose is handled by the motion envelope", () => {
   for (const motion of Object.keys(MOTIONS)) {
     if (motion === "drift") continue; // the default branch
@@ -75,7 +86,7 @@ test("every camera move Jev can choose matches camera.js's MOVES, in order", () 
 test("question sets carry the questions the browser reads", () => {
   assert.deepEqual(
     Object.keys(QUESTION_SETS.taste).sort(),
-    ["accent", "camera", "emptiness", "glyphs", "ground", "motion", "palette", "pattern", "placement"],
+    ["accent", "camera", "emptiness", "form", "glyphs", "ground", "motion", "palette", "pattern", "placement", "shading"],
   );
   assert.deepEqual(
     Object.keys(QUESTION_SETS.pulse).sort(),

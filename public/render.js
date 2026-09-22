@@ -13,7 +13,15 @@ const MAX_DPR = 1.5;
 const LINE_HEIGHT = 1.25;
 const CHAR_ASPECT = 0.6; // IBM Plex Mono advance width / font size
 const LOOK_FADE_S = 2.2; // glyph family + palette crossfade, matched to the pattern crossfade
-const GAMMA = 0.55; // lifts mid-brightness cells: most of a picture sits at 0.2-0.5, which must still read on black
+// Tone curve only — it must not be used to control how much of the frame is lit; `coverage` does that.
+// 0.55 was an attempt to brighten sparse pictures by lifting the whole 0.2-0.5 field distribution into
+// the mid-levels, but that crushed darks and highlights together and left no tonal range at all. 0.7
+// keeps the median low (dark cells stay dark) and lets coverage's histogram cutoff decide density instead.
+const GAMMA = 0.7;
+const HIST_BUCKETS = 128; // resolution of the coverage histogram — cost is O(cells), not O(cells log cells)
+const FLOOR = 0.04; // marks below this are invisible regardless of coverage: thumbnail noise, not signal
+const SOFT_BAND = 0.05; // slice of the 0..1 value range just above a coverage cutoff that fades in, so the edge of coverage is a gradient, not a cliff
+export { FLOOR }; // exported so tests can assert against the canonical floor instead of a duplicated magic number
 const EXPORT_MAX_PIXELS = 15.5e6; // just under iOS Safari's 16.78 MP canvas ceiling; desktops allow far more
 const EXPORT_MAX_EDGE = 8192;
 const FONT_FAMILY = `"IBM Plex Mono", "Cascadia Mono", Consolas, monospace`;
@@ -67,6 +75,31 @@ function asVariants(entry) {
   return Array.isArray(entry) ? entry : [entry];
 }
 
+/**
+ * The value threshold (post-`gain`) that keeps at most `coverage` share of `field`'s cells lit.
+ * Built from a fixed-size histogram over the 0..1 value range, accumulated in one pass and then
+ * scanned from the bright end down until the running count clears the coverage budget — so this
+ * is O(cells + HIST_BUCKETS), not a sort. `hist` is caller-owned scratch (Uint32Array(HIST_BUCKETS)),
+ * reused across calls so a per-layer, per-frame call never allocates. Never drops below FLOOR:
+ * coverage only ever caps density, it never lowers the existing noise floor.
+ */
+export function coverageThreshold(field, gain, coverage, hist = new Uint32Array(HIST_BUCKETS)) {
+  if (coverage >= 1) return FLOOR;
+  hist.fill(0);
+  const n = field.length;
+  for (let i = 0; i < n; i++) {
+    const b = Math.min(HIST_BUCKETS - 1, Math.max(0, (field[i] * gain * HIST_BUCKETS) | 0));
+    hist[b]++;
+  }
+  const budget = coverage * n;
+  let kept = 0, bucket = HIST_BUCKETS - 1;
+  for (; bucket >= 0; bucket--) {
+    kept += hist[bucket];
+    if (kept >= budget) break;
+  }
+  return Math.max(FLOOR, bucket / HIST_BUCKETS);
+}
+
 export class AsciiRenderer {
   constructor(canvas, budget = MAX_CELLS) {
     this.canvas = canvas;
@@ -74,6 +107,7 @@ export class AsciiRenderer {
     this.budget = budget;
     this.atlases = new Map();
     this.orientBufs = new Map(); // per-look orientation buffer, for directional glyph families
+    this.histogram = new Uint32Array(HIST_BUCKETS); // scratch for coverageThreshold, reused every layer every frame
     this.resize();
   }
 
@@ -202,17 +236,23 @@ export class AsciiRenderer {
    * directional, picks the glyph's orientation per cell. `accent` is the share of the
    * brightest cells (v >= 0.9) that use the palette's accent colour instead of the ramp.
    */
-  pass(field, atlas, alpha, ctx, geo, gain, orientBuf, accent) {
+  pass(field, atlas, alpha, ctx, geo, gain, orientBuf, accent, threshold = FLOOR) {
     const { cols, cellW, cellH, tileW, tileH, colX, rowY } = geo;
     const { canvas, slotBase, slotCount, orientCount } = atlas;
+    // Only a coverage-driven cutoff gets a soft edge; the plain floor stays the hard cut it always was,
+    // so coverage 1 (threshold === FLOOR) is byte-for-byte today's behaviour.
+    const soft = threshold > FLOOR ? SOFT_BAND : 0;
     ctx.globalAlpha = alpha;
     for (let i = 0, x = 0, y = 0; i < field.length; i++, x++) {
       if (x === cols) {
         x = 0;
         y++;
       }
-      const v = field[i] * gain;
-      if (v < 0.04) continue;
+      let v = field[i] * gain;
+      if (v < threshold) continue;
+      // Ramp 0 → true value across the band just above the cutoff, so cells at the coverage edge
+      // fade in at the darkest level instead of popping to full brightness and back out as the field moves.
+      if (soft > 0 && v < threshold + soft) v *= (v - threshold) / soft;
       const accented = accent > 0 && v >= 0.9 && cellHash(x, y) % 1000 < accent * 1000;
       const level = accented ? LEVELS : Math.min(LEVELS - 1, Math.floor(v ** GAMMA * LEVELS));
       const orient = orientCount > 1 ? orientBuf[i] : 0;
@@ -236,12 +276,18 @@ export class AsciiRenderer {
     return buf;
   }
 
-  /** One layer's field, with its look (or its two looks mid-fade), onto any context/grid. */
-  paintLayer({ field, look, gain = 1, accent = 0, alpha = 1 }, ctx, geo) {
+  /**
+   * One layer's field, with its look (or its two looks mid-fade), onto any context/grid.
+   * `coverage` (0..1, default 1 = draw everything) caps the share of cells that may be drawn;
+   * the threshold is computed once so both passes of a mid-crossfade look share it — density
+   * must not shift while the look fades.
+   */
+  paintLayer({ field, look, gain = 1, accent = 0, alpha = 1, coverage = 1 }, ctx, geo) {
     const directional = DIRECTIONAL_FAMILIES.has(look.from.glyphs) || DIRECTIONAL_FAMILIES.has(look.to.glyphs);
     const orientBuf = directional ? this.orientationsFor(look, field) : null;
-    if (look.mix < 1) this.pass(field, this.atlas(look.from, geo), alpha * (1 - look.mix), ctx, geo, gain, orientBuf, accent);
-    this.pass(field, this.atlas(look.to, geo), alpha * (look.mix < 1 ? look.mix : 1), ctx, geo, gain, orientBuf, accent);
+    const threshold = coverageThreshold(field, gain, coverage, this.histogram);
+    if (look.mix < 1) this.pass(field, this.atlas(look.from, geo), alpha * (1 - look.mix), ctx, geo, gain, orientBuf, accent, threshold);
+    this.pass(field, this.atlas(look.to, geo), alpha * (look.mix < 1 ? look.mix : 1), ctx, geo, gain, orientBuf, accent, threshold);
   }
 
   /**

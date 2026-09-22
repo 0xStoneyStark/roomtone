@@ -70,7 +70,11 @@ const RESIZE_DEBOUNCE_MS = 250;
 
 // Same breakpoint as the stylesheet's phone layout, checked when it matters rather than at load.
 const phoneLayout = () => matchMedia("(pointer: coarse)").matches || matchMedia("(max-width: 720px)").matches;
-const params = { density: 0.35, turbulence: 0.35, arc: 0.3, drop: 0, speed: 0.5, emptiness: 0, accent: 0 };
+// How much of the frame Jev's fullest emptiness is allowed to clear. Placement decides WHERE the
+// picture sits; coverage decides how much of it there is, which is the part that gives it rest.
+const COVERAGE_FLOOR = 0.25;
+const GROUND_COVERAGE = 0.8; // the under-painting stays thinner still
+const params = { density: 0.35, turbulence: 0.35, arc: 0.3, drop: 0, speed: 0.5, emptiness: 0, accent: 0, form: "smooth", shading: "lit" };
 const targets = { density: 0.35, turbulence: 0.35, arc: 0.3, emptiness: 0, accent: 0 };
 const groundParams = { ...params };
 const motions = { from: "drift", to: "drift", mix: 1 }; // blended over CROSSFADE_S so speed never jumps
@@ -144,6 +148,8 @@ const STARTER_TASTE = {
   palette: { probabilities: { bone: 0.4, glacier: 0.3, dusk: 0.3 }, choice: "bone" },
   motion: { probabilities: { drift: 0.6, breathe: 0.4 }, choice: "drift" },
   camera: { probabilities: { hold: 0.5, drift: 0.3, push: 0.2 }, choice: "hold" },
+  form: { probabilities: { smooth: 0.6, swollen: 0.4 }, choice: "smooth" },
+  shading: { probabilities: { lit: 0.7, points: 0.3 }, choice: "lit" },
   placement: { probabilities: { bleed: 0.5, island: 0.3, horizon: 0.2 }, choice: "bleed" },
   emptiness: { score: 0.5, confidence: 0.5, legend: { 0: "No reserved emptiness", 1: "A little breathing room", 2: "Generous emptiness", 3: "Mostly silence" }, probabilities: { 0: 0.5, 1: 0.5, 2: 0, 3: 0 } },
   accent: { score: 0.5, confidence: 0.5, legend: { 0: "No accent", 1: "A few sparks", 2: "Bold counterpoint" }, probabilities: { 0: 0.5, 1: 0.5, 2: 0 } },
@@ -302,11 +308,16 @@ function applyTaste(body) {
     palette: roll(answers.palette.probabilities),
     motion: roll(answers.motion.probabilities),
     placement: roll(answers.placement.probabilities),
-    // An answer set replayed from before the camera existed has no camera question to roll.
+    // An answer set replayed from before these questions existed has nothing to roll for them.
     camera: answers.camera ? roll(answers.camera.probabilities) : null,
+    form: answers.form ? roll(answers.form.probabilities) : null,
+    shading: answers.shading ? roll(answers.shading.probabilities) : null,
   };
   lastRolled = rolled;
   if (rolled.camera) camera.setMove(rolled.camera);
+  // The solid reads these off the shared params; every other generator ignores them.
+  if (rolled.form) params.form = rolled.form;
+  if (rolled.shading) params.shading = rolled.shading;
   figure.switchTo(rolled.pattern);
   ground.switchTo(rolled.ground === rolled.pattern ? "none" : rolled.ground); // a ground identical to the figure adds nothing
   renderer.setLook(figureLook, rolled.glyphs, rolled.palette);
@@ -437,9 +448,12 @@ function composeLayers(dt, t, live, frozen) {
   const mask = currentMask(dt, t);
   applyMask(views.figure, mask, params.emptiness, masks.figure);
   applyMask(views.ground, mask, params.emptiness * 0.6, masks.ground);
+  // The mask alone cannot empty a frame: `bleed` is all ones, so emptiness through it is a no-op.
+  // Coverage caps how many cells may be lit at all, which is what makes "mostly silence" mean it.
+  const coverage = 1 - params.emptiness * (1 - COVERAGE_FLOOR);
   return [
-    { field: masks.ground, look: groundLook, gain: lastGain * GROUND_GAIN, accent: 0, alpha: GROUND_ALPHA },
-    { field: masks.figure, look: figureLook, gain: lastGain, accent: params.accent },
+    { field: masks.ground, look: groundLook, gain: lastGain * GROUND_GAIN, accent: 0, alpha: GROUND_ALPHA, coverage: coverage * GROUND_COVERAGE },
+    { field: masks.figure, look: figureLook, gain: lastGain, accent: params.accent, coverage },
   ];
 }
 
