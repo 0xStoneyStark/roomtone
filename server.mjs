@@ -147,7 +147,7 @@ function openSession(req, body) {
   const id = randomBytes(12).toString("hex");
   const session = { id, ip, startedAt: now, expiresAt: now + SESSION_S * 1000, calls: 0, taste: 0, tokens: 0 };
   sessions.set(id, session);
-  const source = body?.source === "mic" || body?.source === "demo" ? body.source : "unknown";
+  const source = ["mic", "tab", "demo"].includes(body?.source) ? body.source : "unknown";
   logEvent({ type: "session", session: id, ip: hashIp(ip), country: req.headers["cf-ipcountry"] ?? null, device: deviceOf(req.headers["user-agent"]), source });
   return { session };
 }

@@ -2,7 +2,7 @@
 // Code keeps the clock, the beat, and the crossfades; Jev supplies taste on
 // two clocks: the scene ("taste") when the music turns, the feel ("pulse") as
 // fast as calls return.
-import { Ear, micSource } from "./audio.js";
+import { Ear, micSource, tabSource, canCaptureTab } from "./audio.js";
 import { demoSource } from "./demo-source.js";
 import { Ledger } from "./ledger.js";
 import { PATTERNS } from "./patterns.js";
@@ -617,16 +617,27 @@ function idleFrame(now) {
   renderer.draw([{ field: views.figure, look: figureLook, gain: 1, accent: 0 }], dt, 0);
 }
 
-async function start(source) {
+/** Plain words for a source that would not start; each one has a different thing to do about it. */
+function sourceFailure(err, name) {
+  if (err.name === "NotAllowedError") {
+    return name === "tab"
+      ? "Nothing shared. Press “Listen to a tab” again and pick the tab playing music."
+      : "Microphone blocked. Allow the mic for this page, or play the demo loop.";
+  }
+  if (err.name === "NoAudioTrackError") return err.message;
+  return `Could not start audio: ${err.message}`;
+}
+
+async function start(source, name) {
   const intro = document.getElementById("intro");
   const note = intro.querySelector("[data-intro-message]");
   try {
     await ear.start(source);
   } catch (err) {
-    note.textContent = err.name === "NotAllowedError" ? "Microphone blocked. Allow the mic for this page, or play the demo loop." : `Could not start audio: ${err.message}`;
+    note.textContent = sourceFailure(err, name);
     return;
   }
-  sourceName = source === micSource ? "mic" : "demo";
+  sourceName = name;
   idle = false;
   intro.hidden = true;
   document.getElementById("hud").hidden = false;
@@ -652,8 +663,15 @@ document.fonts.ready.then(() => renderer.resize()).finally(() => {
   requestAnimationFrame(idleFrame);
 });
 
-document.getElementById("start-mic").addEventListener("click", () => start(micSource));
-document.getElementById("start-demo").addEventListener("click", () => start(demoSource));
+document.getElementById("start-mic").addEventListener("click", () => start(micSource, "mic"));
+document.getElementById("start-demo").addEventListener("click", () => start(demoSource, "demo"));
+// Tab audio is desktop Chrome and Edge only; elsewhere the button would promise what cannot work.
+if (canCaptureTab()) {
+  for (const id of ["start-tab", "start-tab-hint"]) document.getElementById(id).hidden = false;
+  document.getElementById("start-tab").addEventListener("click", () => {
+    start((ctx) => tabSource(ctx, () => ledger.say("Sharing ended — the picture keeps moving on what it last heard.", "wait")), "tab");
+  });
+}
 document.getElementById("judge-now").addEventListener("click", askNow);
 document.getElementById("resume").addEventListener("click", resumeJev);
 document.getElementById("ledger-toggle").addEventListener("click", () => ledgerEl.classList.toggle("is-collapsed"));

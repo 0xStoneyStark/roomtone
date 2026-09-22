@@ -94,7 +94,7 @@ npm start
 ```
 
 Open <http://localhost:8790>, press **Start listening**, allow the microphone, and play music in
-the room. **Play the demo loop** runs two synthesised songs instead, no mic needed: a 128 BPM build-and-drop and a slow, airy piece at 84 BPM, changing over every 45 s so the "has the music turned" judgment has a turn to notice.
+the room. **Listen to a tab** (desktop Chrome and Edge) takes the sound straight from a browser tab or the whole system — no microphone, no room, full bandwidth; pick the tab and tick "Also share tab audio". Safari has no `getDisplayMedia`, and Android Chrome never delivers an audio track, so the button hides itself where it cannot work. **Play the demo loop** runs two synthesised songs instead, no mic needed: a 128 BPM build-and-drop and a slow, airy piece at 84 BPM, changing over every 45 s so the "has the music turned" judgment has a turn to notice.
 
 ### On a phone
 

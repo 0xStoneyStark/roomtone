@@ -284,3 +284,37 @@ export async function micSource(ctx) {
   });
   return ctx.createMediaStreamSource(stream);
 }
+
+/**
+ * Whether this browser can hand over the sound a tab or the system is playing. Desktop Chrome and
+ * Edge can; Safari has no getDisplayMedia at all, and Android Chrome has it but never delivers an
+ * audio track, so a coarse pointer rules it out rather than promising something that cannot work.
+ */
+export function canCaptureTab() {
+  return Boolean(navigator.mediaDevices?.getDisplayMedia) && !matchMedia("(pointer: coarse)").matches;
+}
+
+/**
+ * The sound the machine itself is playing, straight from the browser — no microphone, no room.
+ * Screen capture is the only route to it on the web, so a video track comes along unasked; it is
+ * stopped the moment we have the audio. `onLost` fires if the listener ends sharing from the
+ * browser's own bar, which is the one way this stream dies without an error.
+ */
+export async function tabSource(ctx, onLost) {
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: true, // Chrome refuses an audio-only display capture, so we ask and then discard
+    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    systemAudio: "include",
+    selfBrowserSurface: "exclude", // never offer Roomtone's own tab: it would hear itself
+  });
+  for (const track of stream.getVideoTracks()) track.stop();
+  const [audio] = stream.getAudioTracks();
+  if (!audio) {
+    for (const track of stream.getTracks()) track.stop();
+    const err = new Error("That share had no sound. Pick a tab and tick “Also share tab audio”, or share your whole screen with system audio.");
+    err.name = "NoAudioTrackError";
+    throw err;
+  }
+  if (onLost) audio.addEventListener("ended", onLost);
+  return ctx.createMediaStreamSource(stream);
+}
