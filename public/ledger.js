@@ -49,6 +49,11 @@ export class Ledger {
     this.metaLine = root.querySelector("[data-meta]");
     this.note = root.querySelector("[data-note]");
     this.message = root.querySelector("[data-message]");
+    // Two more optional listener-driven lines, built the same way the note is (no
+    // innerHTML, both can carry user text) and slotted in right after it.
+    this.direction = el("p", "ledger__note");
+    this.rejected = el("p", "ledger__heard");
+    this.note.after(this.direction, this.rejected);
     this.pulse = null; // live rows, created on the first pulse answer
   }
 
@@ -66,6 +71,12 @@ export class Ledger {
   showTaste({ state, answers, rolled, replayed }) {
     this.heard.textContent = (replayed ? "(replay) " : "") + Object.values(state.sound).join(" · ");
     this.note.textContent = state.listener_note === "(none)" ? "" : `you said: ${state.listener_note}`;
+    // listener_direction and already_rejected are newer, listener-driven state: gate on them the
+    // same defensive way as the taste answers below, since a replayed answer set can predate them.
+    this.direction.textContent =
+      !state.listener_direction || state.listener_direction === "(none)" ? "" : `you asked for: ${state.listener_direction}`;
+    this.rejected.textContent =
+      !state.already_rejected || state.already_rejected === "(none)" ? "" : `avoiding: ${state.already_rejected}`;
     this.tasteRows.replaceChildren();
     this.rowIndex = 0;
     // Defensive: older replays may carry a narrower answer set than the current question set.
@@ -74,6 +85,7 @@ export class Ledger {
     if (answers.glyphs) this.choiceRows("glyphs", answers.glyphs, rolled.glyphs, 2);
     if (answers.palette) this.choiceRows("colour", answers.palette, rolled.palette, 2);
     if (answers.motion) this.choiceRows("motion", answers.motion, rolled.motion, 2);
+    if (answers.camera) this.choiceRows("camera", answers.camera, rolled.camera, 2);
     if (answers.placement) this.choiceRows("placement", answers.placement, rolled.placement, 2);
     if (answers.emptiness) this.scoreRowOnce("emptiness", answers.emptiness);
     if (answers.accent) this.scoreRowOnce("accent", answers.accent);

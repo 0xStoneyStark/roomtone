@@ -4,7 +4,7 @@
 // so the warm-up and crossfade timing can be checked without a real pattern's noise.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CROSSFADE_S, Layer, WARM_STEPS } from "../public/layer.js";
+import { CROSSFADE_S, Layer, OVERSCAN, WARM_STEPS } from "../public/layer.js";
 import { PATTERNS } from "../public/patterns.js";
 
 const LIVE = { energy: 0.3, bass: 0.2, beat: 0, bpm: 120 };
@@ -78,14 +78,53 @@ test("switchTo the already-queued pattern's name is a no-op", () => {
   assert.equal(layer.next, queued, "the queued pattern instance should not be replaced");
 });
 
-test("rebuild recreates the current pattern at the new size and drops any queued pattern", () => {
+test("rebuild recreates the current pattern at the new overscanned size and drops any queued pattern", () => {
   const { patterns } = makeFakePatterns();
   const layer = new Layer(patterns, 4, 4, 1, "a");
   layer.switchTo("b");
   assert.equal(layer.transitioning, true);
 
+  // rebuild takes SCREEN dimensions; the field it reallocates is those dimensions times overscan.
   layer.rebuild(6, 5, 1);
   assert.equal(layer.transitioning, false);
+  const expectedCols = Math.round(6 * OVERSCAN);
+  const expectedRows = Math.round(5 * OVERSCAN);
+  assert.equal(layer.cols, expectedCols);
+  assert.equal(layer.rows, expectedRows);
+  const field = layer.step(0.016, 0, LIVE, PARAMS);
+  assert.equal(field.length, expectedCols * expectedRows);
+});
+
+test("layer.cols/rows report the overscanned field size, not the screen size passed to the constructor", () => {
+  const { patterns } = makeFakePatterns();
+  const layer = new Layer(patterns, 10, 8, 1, "a");
+  assert.equal(layer.cols, Math.round(10 * OVERSCAN));
+  assert.equal(layer.rows, Math.round(8 * OVERSCAN));
+});
+
+test("step returns a field sized cols*rows for the overscanned dimensions, not the screen dimensions", () => {
+  const { patterns } = makeFakePatterns();
+  const layer = new Layer(patterns, 10, 8, 1, "a");
+  const field = layer.step(0.016, 0, LIVE, PARAMS);
+  assert.equal(field.length, layer.cols * layer.rows);
+  assert.equal(field.length, Math.round(10 * OVERSCAN) * Math.round(8 * OVERSCAN));
+  assert.notEqual(field.length, 10 * 8, "field must be larger than the screen grid, not equal to it");
+});
+
+test("a custom overscan passed to the constructor is honoured by cols/rows and the stepped field", () => {
+  const { patterns } = makeFakePatterns();
+  const layer = new Layer(patterns, 10, 8, 1, "a", 2);
+  assert.equal(layer.cols, 20);
+  assert.equal(layer.rows, 16);
+  const field = layer.step(0.016, 0, LIVE, PARAMS);
+  assert.equal(field.length, 320);
+});
+
+test("overscan = 1 reproduces today's exact behaviour: the field equals the screen grid", () => {
+  const { patterns } = makeFakePatterns();
+  const layer = new Layer(patterns, 6, 5, 1, "a", 1);
+  assert.equal(layer.cols, 6);
+  assert.equal(layer.rows, 5);
   const field = layer.step(0.016, 0, LIVE, PARAMS);
   assert.equal(field.length, 30);
 });

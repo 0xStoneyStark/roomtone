@@ -22,8 +22,10 @@
     {
       "imports": {
         "./audio.js": "./audio.js?v=__V__",
+        "./camera.js": "./camera.js?v=__V__",
         "./composition.js": "./composition.js?v=__V__",
         "./demo-source.js": "./demo-source.js?v=__V__",
+        "./directing.js": "./directing.js?v=__V__",
         "./layer.js": "./layer.js?v=__V__",
         "./ledger.js": "./ledger.js?v=__V__",
         "./marks.js": "./marks.js?v=__V__",
@@ -64,11 +66,13 @@
     <div class="hud__corner hud__corner--tl">
       <p id="status" class="status" aria-live="off">
         <span data-k="state">listening</span><span data-k="time">0:00</span><span data-k="bpm">no beat</span><span data-k="judgments">0 judgments</span><span data-k="perf">— fps</span>
+        <span id="held" class="held" hidden>holding a picture</span>
       </p>
       <label class="note">
-        <span class="note__label">what's playing, or where are you?</span>
-        <input id="note" class="note__input" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="e.g. Radiohead, rain outside" />
+        <span class="note__label">direct it, or say where you are</span>
+        <input id="note" class="note__input" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="e.g. darker, slower, rain outside" />
       </label>
+      <div id="direction-chips" class="chips" role="group" aria-label="direction chips"></div>
       <button id="save-frame" class="button button--quiet button--small save-frame" type="button">Save this frame</button>
     </div>
 

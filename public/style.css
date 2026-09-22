@@ -200,7 +200,8 @@ input {
 .button:focus-visible,
 .note__input:focus-visible,
 .cadence input:focus-visible,
-.ledger__button:focus-visible {
+.ledger__button:focus-visible,
+.chip:focus-visible {
   outline: 1px solid var(--accent-c);
   outline-offset: 3px;
 }
@@ -297,6 +298,53 @@ kbd {
 .note__input:focus {
   border-bottom-color: var(--accent-c);
   outline: none;
+}
+
+/* Direction chips: quick presets that fold into the same sentence as the note. --------- */
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--display);
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-size: 11px;
+  background: var(--ink-08);
+  color: var(--ink);
+  border: 0;
+  padding: 8px 14px;
+  cursor: pointer;
+  clip-path: var(--cut);
+  box-shadow: inset 0 0 0 1px var(--ink-15);
+  transition: background 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms var(--ease);
+}
+
+.chip:hover {
+  background: var(--accent-12);
+  box-shadow: inset 0 0 0 1px var(--accent-70);
+}
+
+.chip:active {
+  transform: translateY(1px);
+}
+
+/* Pressed reads as ON at a glance: a solid accent fill, not a subtle tint. */
+.chip[aria-pressed="true"] {
+  background: var(--accent-c);
+  color: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--accent-c), 0 0 12px var(--accent-35);
+}
+
+.chip[aria-pressed="true"]:hover {
+  background: var(--accent-c);
 }
 
 .save-frame {
@@ -629,6 +677,11 @@ kbd {
     width: 100%;
   }
 
+  .chip {
+    min-height: 44px;
+    padding: 0 16px;
+  }
+
   .keys {
     display: none;
   }
@@ -673,6 +726,7 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .ledger,
   .button,
+  .chip,
   .meter i,
   .frame,
   .led {

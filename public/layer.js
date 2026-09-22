@@ -5,6 +5,7 @@
 export const CROSSFADE_S = 2.2; // pattern, motion and look all cross over together
 export const WARM_STEPS = 30; // coarse simulated steps a new pattern gets before it starts fading in
 export const WARM_DT = 1 / 15;
+export const OVERSCAN = 1.35; // field dims are this multiple of the screen grid, so the camera can pull back/drift without hitting the edge
 
 /** One pattern instance: its own field buffer, generator, and warm-up budget still owed.
  * The special name "none" has no generator — its field stays all zeros — so a layer can
@@ -16,15 +17,19 @@ function makeInstance(patterns, name, cols, rows, aspect) {
 }
 
 export class Layer {
-  constructor(patterns, cols, rows, aspect, name = "none") {
+  constructor(patterns, cols, rows, aspect, name = "none", overscan = OVERSCAN) {
     this.patterns = patterns;
-    this.cols = cols;
-    this.rows = rows;
+    this.overscan = overscan;
+    // fieldCols/fieldRows are the actual buffer size patterns step across; cols/rows
+    // getters below expose them to the caller (the camera sampler needs the field size,
+    // not the screen size that was passed in).
+    this.fieldCols = Math.round(cols * overscan);
+    this.fieldRows = Math.round(rows * overscan);
     this.aspect = aspect;
-    this.current = makeInstance(patterns, name, cols, rows, aspect);
+    this.current = makeInstance(patterns, name, this.fieldCols, this.fieldRows, aspect);
     this.next = null;
     this.fade = 0;
-    this.blend = new Float32Array(cols * rows);
+    this.blend = new Float32Array(this.fieldCols * this.fieldRows);
   }
 
   /** The pattern this layer is settling to: next's name mid-switch, else current's. */
@@ -37,22 +42,32 @@ export class Layer {
     return this.next !== null;
   }
 
+  /** Field width in cells (screen cols × overscan, rounded) — what the camera sampler reads against. */
+  get cols() {
+    return this.fieldCols;
+  }
+
+  /** Field height in cells (screen rows × overscan, rounded). */
+  get rows() {
+    return this.fieldRows;
+  }
+
   /** Queue a new pattern for warm-up then crossfade. No-op if already current or already queued. */
   switchTo(name) {
     if (this.current.name === name || this.next?.name === name) return;
-    this.next = makeInstance(this.patterns, name, this.cols, this.rows, this.aspect);
+    this.next = makeInstance(this.patterns, name, this.fieldCols, this.fieldRows, this.aspect);
     this.fade = 0;
   }
 
-  /** Grid size changed: restart the current pattern at the new size and drop any queued one. */
+  /** Screen grid size changed: restart the current pattern at the new overscanned size and drop any queued one. */
   rebuild(cols, rows, aspect) {
-    this.cols = cols;
-    this.rows = rows;
+    this.fieldCols = Math.round(cols * this.overscan);
+    this.fieldRows = Math.round(rows * this.overscan);
     this.aspect = aspect;
-    this.current = makeInstance(this.patterns, this.current.name, cols, rows, aspect);
+    this.current = makeInstance(this.patterns, this.current.name, this.fieldCols, this.fieldRows, aspect);
     this.next = null;
     this.fade = 0;
-    this.blend = new Float32Array(cols * rows);
+    this.blend = new Float32Array(this.fieldCols * this.fieldRows);
   }
 
   /** Advance the current pattern and, if one is queued, warm it up then cross over to it. */

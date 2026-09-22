@@ -4,7 +4,7 @@ ASCII pictures, art-directed by [Jev](https://docs.typesafe.ai) from the music a
 
 Not a waveform. What the microphone hears is turned into words — tempo, loudness, bass,
 brightness, rhythm, texture, dynamics — and Jev (TypeSafe's System One decision model)
-answers thirteen questions about them, on two clocks:
+answers fourteen questions about them, on two clocks:
 
 **Taste** — the scene, judged over the last six seconds whenever the music turns or the hold runs out (slider, default 45 s):
 
@@ -15,6 +15,7 @@ answers thirteen questions about them, on two clocks:
 | glyphs | Choice over 9 | blocks · dots · braille · lines · katakana · symbols · classic · strokes · hatching |
 | colour | Choice over 11 | ember · glacier · phosphor · violet · acid · dusk · bone · blood · ink · sepia · riso |
 | motion | Choice over 5 | drift · pulse · surge · stutter · breathe |
+| camera | Choice over 5 | hold · push · pull · drift · sway |
 | placement | Choice over 6 | bleed · horizon · island · diagonal · constellation · edge |
 | emptiness | Score, 4 levels | none reserved → a little breathing room → generous → mostly silence |
 | accent | Score, 3 levels | no accent → a few sparks → bold counterpoint |
@@ -47,7 +48,7 @@ header keeps a running token count. Turn live feel off for ≈ $0.06 an hour.
 
 ## The artistic pass
 
-Five moves turn "which pattern, which colour" into something that reads as art-directed rather
+Six moves turn "which pattern, which colour" into something that reads as art-directed rather
 than randomised.
 
 **Marks, not pixels.** Two of the nine glyph families, `strokes` and `hatching`, don't pick a
@@ -59,6 +60,11 @@ printed.
 a rising diagonal, a scattered constellation, or lit from one edge — as a soft mask laid over
 whatever pattern is playing. `emptiness` is a second, independent dial: how much of the frame Jev
 holds back as reserved dark space around that mass, from none at all to mostly silence.
+
+**Camera.** The pattern field is now rendered larger than the screen grid — overscan — so the
+`camera` question has room to move the frame across it: hold, push, pull, drift, or sway. The
+camera resamples the field rather than transforming the glyphs, which is what keeps the character
+lattice intact as the view moves.
 
 **Colour with restraint.** Every palette ramps in two tones, dark through a mood's primary hue and
 then drifting toward a second hue as it brightens, and `accent` decides how much of a sparse,
@@ -115,6 +121,8 @@ per-request nonce), `nosniff`, `frame-ancestors 'none'` and a microphone-only Pe
 - **what's playing, or where are you?** — free text that goes into Jev's state with the audio description.
 - **H** hides the ledger, **N** asks Jev for a new picture right now.
 - **hold a picture at most** — 10–120 s; a new picture comes sooner when Jev judges the music has turned.
+- **direction chips** — darker, slower, emptier, warmer, break it, or type your own; tapped chips and the typed note combine into one sentence sent to Jev as `listener_direction`. Jev is told to follow it where the music allows, not obey it blindly — the audio still gets a say.
+- **press and hold** the picture to keep it past its usual hold time; **swipe** it away to reject it, and Jev avoids that choice the next time it rolls.
 - **Start Jev again** — each press of Start opens a server-side session (`POST /api/session`) good for 2½ minutes of Jev (`SESSION_S`, default 150, on the server; the page's copy says "2½ minutes", change both together). Every judgment carries the session token; when it expires the server answers 429 `session_expired`, the picture keeps moving on its last odds, and the button opens the next session. An address gets `SESSIONS_PER_IP_PER_HOUR` (default 6) starts per rolling hour, then 429 `sessions_exhausted` with a retry time. Together with the per-IP rate limit (300 calls/min) and the hourly token budget this bounds what a public deployment can spend.
 
 ## What people try (words, never audio)

@@ -32,6 +32,8 @@ const RETRY = { maxRetries: 4, backoffInitialMs: 600, backoffMaxMs: 6000 };
 const MAX_BODY_BYTES = 8 * 1024;
 const MAX_FIELD_CHARS = 160;
 const MAX_NOTE_CHARS = 200;
+const MAX_REJECTED_ITEMS = 12;
+const MAX_REJECTED_CHARS = 40;
 const RATE_LIMIT_PER_MIN = 300; // the live loop peaks at 150/min; the rest is headroom for the taste calls
 // Behind Cloudflare / a reverse proxy every socket is local; TRUST_PROXY=1 reads the forwarded client IP instead.
 const TRUST_PROXY = process.env.TRUST_PROXY === "1";
@@ -189,10 +191,22 @@ function cleanText(value, max) {
   return trimmed.slice(0, max);
 }
 
+/** The listener's swipe-away trail: short descriptors of pictures just turned down, joined into
+ * one line Jev reads well. Non-strings are dropped rather than rejected, same spirit as cleanText. */
+function cleanRejected(value) {
+  if (!Array.isArray(value)) return "(none)";
+  const items = value
+    .filter((v) => typeof v === "string")
+    .slice(0, MAX_REJECTED_ITEMS)
+    .map((v) => cleanText(v, MAX_REJECTED_CHARS))
+    .filter(Boolean);
+  return items.length ? items.join("; ") : "(none)";
+}
+
 /** Build the Jev state and pick the question set from the browser's request; rejects anything off-shape. */
 function buildRequest(body) {
   if (!body || typeof body !== "object" || !body.sound || typeof body.sound !== "object") {
-    throw new Error("expected { sound: {...}, set?, note?, local_time? }");
+    throw new Error("expected { sound: {...}, set?, note?, local_time?, direction?, rejected? }");
   }
   const set = body.set ?? "all";
   if (!Object.hasOwn(QUESTION_SETS, set)) throw new Error(`set must be one of ${Object.keys(QUESTION_SETS).join(", ")}`);
@@ -216,6 +230,8 @@ function buildRequest(body) {
     : {
         sound,
         listener_note: cleanText(body.note, MAX_NOTE_CHARS) ?? "(none)",
+        listener_direction: cleanText(body.direction, MAX_NOTE_CHARS) ?? "(none)",
+        already_rejected: cleanRejected(body.rejected),
         local_time: cleanText(body.local_time, 60) ?? "(unknown)",
       };
   return { set, state, questions: QUESTION_SETS[set] };
@@ -263,7 +279,7 @@ async function handleJudge(req, res) {
     session.tokens += result.usage.input_tokens;
     if (request.set !== "pulse") {
       session.taste += 1;
-      logEvent({ type: "taste", session: session.id, at: Math.round((Date.now() - session.startedAt) / 1000), sound: request.state.sound, note: request.state.listener_note, picks: picksOf(result.answers) });
+      logEvent({ type: "taste", session: session.id, at: Math.round((Date.now() - session.startedAt) / 1000), sound: request.state.sound, note: request.state.listener_note, direction: request.state.listener_direction, picks: picksOf(result.answers) });
     }
     sendJson(res, 200, {
       set: request.set,

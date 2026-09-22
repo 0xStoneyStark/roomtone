@@ -1,5 +1,5 @@
 // The art director's brief. Two question sets run on different clocks:
-//   taste – the scene: figure, ground, glyphs, colour, motion, placement, emptiness, accent.
+//   taste – the scene: figure, ground, glyphs, colour, motion, camera, placement, emptiness, accent.
 //           Asked when the music turns (or after a maximum hold) over a six-second description,
 //           rolled from Jev's probabilities.
 //   pulse – the live feel: fill, order, arc, drop-soon, and whether the passage has turned.
@@ -11,6 +11,8 @@ import { choice, noul, score } from "@typesafe-ai/sdk";
 const CONTEXT =
   "`sound` describes the last six seconds heard by a microphone in the room. " +
   "`listener_note` is what the listener typed about the music or the setting, or \"(none)\". " +
+  "`listener_direction` is an instruction the listener has just explicitly asked for, such as \"darker, slower\", or \"(none)\" — follow it where it can be. " +
+  "`already_rejected` lists pictures the listener has just swiped away, or \"(none)\" — do not offer them again unless the music really calls for them. " +
   "`local_time` is the listener's clock.";
 
 const PULSE_CONTEXT =
@@ -74,6 +76,16 @@ export const MOTIONS = {
   breathe: "A slow in-and-out swell every few seconds regardless of the beat. For ambient, ballads, calm.",
 };
 
+// The camera watching the scene, on its own axis from the figure's own motion. Jev is choosing for
+// a feeling the music gives, not executing a camera instruction.
+export const CAMERAS = {
+  hold: "The camera holds almost still, watching from one fixed point. For music that feels settled, steady, content to stay exactly where it is.",
+  push: "The camera pushes slowly inward, drawing closer over time. For music that feels like it is intensifying, focusing in, closing the distance.",
+  pull: "The camera pulls slowly backward, opening the view out. For music that feels like it is releasing, relaxing, stepping back to take stock.",
+  drift: "The camera traverses sideways at an even, unhurried pace. For music that feels like it is travelling, restless, going somewhere.",
+  sway: "The camera orbits gently around the scene rather than approaching it. For music that feels like it is circling, dreamy, unresolved.",
+};
+
 // Where the mass of the picture sits: composition, applied as a soft mask over any figure.
 export const PLACEMENTS = {
   bleed: "Full bleed: the picture fills the whole frame edge to edge. Big, immersive, wall-of-sound music.",
@@ -122,7 +134,7 @@ export const ACCENT_LEVELS = [
 
 export const TASTE_QUESTIONS = {
   pattern: choice(
-    { context: CONTEXT, question: "Which moving ASCII figure, the foreground picture, best fits the music in `sound`, taking `listener_note` into account when it says what is playing or where the listener is?" },
+    { context: CONTEXT, question: "Which moving ASCII figure, the foreground picture, best fits the music in `sound`, taking `listener_note` into account when it says what is playing or where the listener is, following `listener_direction` where it can apply, and not repeating anything in `already_rejected` unless the music really calls for it?" },
     PATTERNS,
   ),
   ground: choice(
@@ -130,23 +142,27 @@ export const TASTE_QUESTIONS = {
     GROUNDS,
   ),
   glyphs: choice(
-    { context: CONTEXT, question: "Which family of characters should the figure be drawn with, to match the feel of the music in `sound` and `listener_note`?" },
+    { context: CONTEXT, question: "Which family of characters should the figure be drawn with, to match the feel of the music in `sound` and `listener_note`, following `listener_direction` where it can apply, and not repeating anything in `already_rejected` unless the music really calls for it?" },
     GLYPHS,
   ),
   palette: choice(
-    { context: CONTEXT, question: "Which colour mood suits the music in `sound` and the setting in `listener_note` and `local_time`?" },
+    { context: CONTEXT, question: "Which colour mood suits the music in `sound` and the setting in `listener_note` and `local_time`, following `listener_direction` where it can apply, and not repeating anything in `already_rejected` unless the music really calls for it?" },
     PALETTES,
   ),
   motion: choice(
     { context: CONTEXT, question: "How should the picture move, given the rhythm and tempo described in `sound`?" },
     MOTIONS,
   ),
+  camera: choice(
+    { context: CONTEXT, question: "Which camera movement suits the music in `sound` and the setting in `listener_note` and `local_time`?" },
+    CAMERAS,
+  ),
   placement: choice(
-    { context: CONTEXT, question: "Where should the mass of the picture sit in the frame, for the music in `sound` and the setting in `listener_note`?" },
+    { context: CONTEXT, question: "Where should the mass of the picture sit in the frame, for the music in `sound` and the setting in `listener_note`, following `listener_direction` where it can apply, and not repeating anything in `already_rejected` unless the music really calls for it?" },
     PLACEMENTS,
   ),
   emptiness: score(
-    { context: CONTEXT, question: "How much of the frame should be kept as reserved dark space around the picture, for the music in `sound`?" },
+    { context: CONTEXT, question: "How much of the frame should be kept as reserved dark space around the picture, for the music in `sound`, following `listener_direction` where it can apply, and not repeating anything in `already_rejected` unless the music really calls for it?" },
     EMPTINESS_LEVELS,
   ),
   accent: score(

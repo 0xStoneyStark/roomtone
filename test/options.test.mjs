@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  CAMERAS,
   GLYPHS,
   GROUNDS,
   MOTIONS,
@@ -17,6 +18,7 @@ import { PATTERNS } from "../public/patterns.js";
 import { GLYPH_RAMPS } from "../public/render.js";
 import { PALETTES } from "../public/palettes.js";
 import { PLACEMENTS } from "../public/composition.js";
+import { MOVES } from "../public/camera.js";
 
 const appSource = readFileSync(new URL("../public/app.js", import.meta.url), "utf8");
 
@@ -66,10 +68,14 @@ test("every motion Jev can choose is handled by the motion envelope", () => {
   }
 });
 
+test("every camera move Jev can choose matches camera.js's MOVES, in order", () => {
+  assert.deepEqual(Object.keys(CAMERAS), MOVES);
+});
+
 test("question sets carry the questions the browser reads", () => {
   assert.deepEqual(
     Object.keys(QUESTION_SETS.taste).sort(),
-    ["accent", "emptiness", "glyphs", "ground", "motion", "palette", "pattern", "placement"],
+    ["accent", "camera", "emptiness", "glyphs", "ground", "motion", "palette", "pattern", "placement"],
   );
   assert.deepEqual(
     Object.keys(QUESTION_SETS.pulse).sort(),

@@ -10,6 +10,8 @@ import { AsciiRenderer } from "./render.js";
 import { PALETTES } from "./palettes.js";
 import { Layer, CROSSFADE_S } from "./layer.js";
 import { makeMask, applyMask, mixMasks } from "./composition.js";
+import { Camera, sampleThrough } from "./camera.js";
+import { Directing, composeDirection } from "./directing.js";
 
 const TASTE_WINDOW_S = 6;
 const PULSE_WINDOW_S = 2;
@@ -46,6 +48,15 @@ const ARC_GAIN_MAX = 1.2;
 const DROP_SHIMMER = 0.4;
 const GROUND_GAIN = 0.6; // the ground layer stays an under-painting: thinner (gain) and translucent (alpha)
 const GROUND_ALPHA = 0.45;
+// Parallax: the ground sits further away, so the camera moves it less. This is the whole depth cue.
+const GROUND_DEPTH = 0.35;
+const FIGURE_DEPTH = 1;
+// Directing: chips and the note are debounced into one re-judgment, so tapping three in a row
+// costs one call rather than three.
+const DIRECT_DEBOUNCE_MS = 700;
+const HOLD_MS = 450; // press and hold this long to keep the picture Jev has chosen
+const SWIPE_PX = 70; // a flick this far across rejects it
+const REJECT_MEMORY = 6; // how many turned-down pictures Jev is told about
 const ACCENT_SHARE = [0, 0.06, 0.25]; // share of the loudest marks in the accent colour, per Jev level
 const GOVERNOR_OFF = new URLSearchParams(location.search).has("nogov"); // for recordings, where capture throttles rAF
 // Quality governor: shrink the glyph grid when frames run long, never grow it back mid-session.
@@ -79,6 +90,7 @@ const holdLabel = document.getElementById("cadence-label");
 const liveInput = document.getElementById("live");
 const restEl = document.getElementById("rest");
 const restBody = document.getElementById("rest-body");
+const heldEl = document.getElementById("held");
 const restDefault = restBody.textContent;
 const ear = new Ear();
 
@@ -86,7 +98,14 @@ const figure = new Layer(PATTERNS, renderer.cols, renderer.rows, renderer.aspect
 const ground = new Layer(PATTERNS, renderer.cols, renderer.rows, renderer.aspect, "none");
 const figureLook = renderer.createLook("dots", "bone");
 const groundLook = renderer.createLook("dots", "bone");
+const camera = new Camera();
+let directing = null; // the chips and the note, composed into one sentence for Jev
+let rejected = []; // pictures the listener has just swiped away
+let lastRolled = null; // what the current scene rolled, so a rejection can name it
+let held = false; // the listener is holding this picture: no new scene until they let go
+let directTimer = 0;
 let masks = null; // { from, to, mixed, figure, ground } Float32Arrays sized to the grid
+let views = null; // the camera's window onto each layer's larger field, at screen size
 let flash = 0;
 let lastFrame = 0;
 let startedAt = 0;
@@ -124,6 +143,7 @@ const STARTER_TASTE = {
   glyphs: { probabilities: { dots: 0.5, classic: 0.3, braille: 0.2 }, choice: "dots" },
   palette: { probabilities: { bone: 0.4, glacier: 0.3, dusk: 0.3 }, choice: "bone" },
   motion: { probabilities: { drift: 0.6, breathe: 0.4 }, choice: "drift" },
+  camera: { probabilities: { hold: 0.5, drift: 0.3, push: 0.2 }, choice: "hold" },
   placement: { probabilities: { bleed: 0.5, island: 0.3, horizon: 0.2 }, choice: "bleed" },
   emptiness: { score: 0.5, confidence: 0.5, legend: { 0: "No reserved emptiness", 1: "A little breathing room", 2: "Generous emptiness", 3: "Mostly silence" }, probabilities: { 0: 0.5, 1: 0.5, 2: 0, 3: 0 } },
   accent: { score: 0.5, confidence: 0.5, legend: { 0: "No accent", 1: "A few sparks", 2: "Bold counterpoint" }, probabilities: { 0: 0.5, 1: 0.5, 2: 0 } },
@@ -142,6 +162,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function allocMasks() {
   const n = renderer.cols * renderer.rows;
   masks = { from: new Float32Array(n), to: new Float32Array(n), mixed: new Float32Array(n), figure: new Float32Array(n), ground: new Float32Array(n) };
+  // Each layer's pattern field is larger than the screen; these hold the part the camera is showing.
+  views = { figure: new Float32Array(n), ground: new Float32Array(n) };
 }
 
 /** Rebuild the grid after a size or budget change; the picture restarts, so this is kept rare. */
@@ -220,6 +242,11 @@ async function postJudge(payload) {
 /** The scene: figure, ground, glyphs, colour, motion, placement, emptiness, accent. Rolled from Jev's odds. */
 async function judgeTaste() {
   if (tasteInFlight || jevResting) return;
+  if (held) {
+    // The listener is holding this picture. The feel keeps breathing; the scene does not change.
+    nextTasteAt = performance.now() + 500;
+    return;
+  }
   const sound = ear.describe(TASTE_WINDOW_S);
   if (!sound) {
     ledger.say("Nothing to hear yet — play something near the mic.", "wait");
@@ -234,7 +261,15 @@ async function judgeTaste() {
   const soundNow = ear.describe(PULSE_WINDOW_S) ?? sound;
   try {
     // With the live loop off, the pulse questions ride along on this call instead.
-    const body = await postJudge({ sound, set: liveInput.checked ? "taste" : "all", note: noteInput.value, local_time: localTime() });
+    const body = await postJudge({
+      sound,
+      set: liveInput.checked ? "taste" : "all",
+      note: directing.note,
+      // The chips alone: the note already travels as listener_note and does not need saying twice.
+      direction: composeDirection(directing.active, ""),
+      rejected,
+      local_time: localTime(),
+    });
     tasteFailures = 0;
     lastTaste = body;
     applyTaste(body);
@@ -267,7 +302,11 @@ function applyTaste(body) {
     palette: roll(answers.palette.probabilities),
     motion: roll(answers.motion.probabilities),
     placement: roll(answers.placement.probabilities),
+    // An answer set replayed from before the camera existed has no camera question to roll.
+    camera: answers.camera ? roll(answers.camera.probabilities) : null,
   };
+  lastRolled = rolled;
+  if (rolled.camera) camera.setMove(rolled.camera);
   figure.switchTo(rolled.pattern);
   ground.switchTo(rolled.ground === rolled.pattern ? "none" : rolled.ground); // a ground identical to the figure adds nothing
   renderer.setLook(figureLook, rolled.glyphs, rolled.palette);
@@ -369,6 +408,7 @@ function checkDropRelease(live, now) {
     flash = 1;
     params.drop = 0;
     lastReleaseAt = now;
+    camera.release();
     nextTasteAt = 0; // re-roll the picture on the drop itself
   }
 }
@@ -383,14 +423,20 @@ function currentMask(dt, t) {
   return masks.mixed;
 }
 
-/** Both layers for this frame: figure over ground, each composed by the mask. */
+/**
+ * Both layers for this frame: figure over ground, each seen through the camera and composed by
+ * the mask. The camera resamples the field rather than moving the glyphs, so the character
+ * lattice never shifts off its grid — the picture moves, the text does not.
+ */
 function composeLayers(dt, t, live, frozen) {
   Object.assign(groundParams, params, { density: params.density * 0.6, speed: params.speed * 0.6 });
   const figureField = figure.step(dt, t, live, params, frozen);
   const groundField = ground.step(dt, t, live, groundParams, frozen);
+  sampleThrough(figureField, figure.cols, figure.rows, camera.view(FIGURE_DEPTH), views.figure, renderer.cols, renderer.rows);
+  sampleThrough(groundField, ground.cols, ground.rows, camera.view(GROUND_DEPTH), views.ground, renderer.cols, renderer.rows);
   const mask = currentMask(dt, t);
-  applyMask(figureField, mask, params.emptiness, masks.figure);
-  applyMask(groundField, mask, params.emptiness * 0.6, masks.ground);
+  applyMask(views.figure, mask, params.emptiness, masks.figure);
+  applyMask(views.ground, mask, params.emptiness * 0.6, masks.ground);
   return [
     { field: masks.ground, look: groundLook, gain: lastGain * GROUND_GAIN, accent: 0, alpha: GROUND_ALPHA },
     { field: masks.figure, look: figureLook, gain: lastGain, accent: params.accent },
@@ -460,6 +506,10 @@ function frame(now) {
   checkDropRelease(live, now);
   flash *= Math.exp(-dt * FLASH_DECAY);
   const charge = Math.max(0, Math.min(1, (params.drop - 0.4) / 0.4));
+  // The frame opens up while Jev expects a drop and snaps in when one lands: the picture
+  // anticipates the music instead of only reacting to it.
+  camera.setCharge(charge);
+  camera.step(dt, t, live);
   lastGain = ARC_GAIN_MIN + (ARC_GAIN_MAX - ARC_GAIN_MIN) * params.arc + DROP_SHIMMER * charge * beatEnv;
   lastLayers = composeLayers(dt, t, live, frozen);
   renderer.draw(lastLayers, dt, flash);
@@ -523,6 +573,35 @@ function askNow() {
   else nextTasteAt = 0;
 }
 
+/** Holding keeps the current picture: the feel still breathes, but no new scene is asked for. */
+function setHeld(on) {
+  if (held === on) return;
+  held = on;
+  heldEl.hidden = !on;
+  if (!on) nextTasteAt = Math.max(nextTasteAt, performance.now() + 1500); // a moment to look before it moves
+}
+
+/**
+ * Swiped away: name what was turned down and ask for something else. Jev is told about the last
+ * few rejections, so it stops offering them — taste that accumulates inside a stateless model,
+ * with the browser carrying the memory.
+ */
+function rejectCurrent() {
+  if (!lastRolled) return;
+  const descriptor = `${lastRolled.pattern} in ${lastRolled.palette} with ${lastRolled.glyphs}`;
+  rejected = [descriptor, ...rejected.filter((x) => x !== descriptor)].slice(0, REJECT_MEMORY);
+  setHeld(false);
+  askNow();
+}
+
+/** Chips and the note are a direction, not a search box: settle briefly, then re-judge once. */
+function directed() {
+  clearTimeout(directTimer);
+  directTimer = setTimeout(() => {
+    if (!idle) askNow();
+  }, DIRECT_DEBOUNCE_MS);
+}
+
 /** Before Start: embers drifting slowly behind the intro, driven by a gentle synthetic swell instead of audio. */
 function idleFrame(now) {
   if (!idle) return;
@@ -532,8 +611,10 @@ function idleFrame(now) {
   const t = now / 1000;
   const live = { energy: 0.35 + 0.15 * Math.sin(t * 0.7), bass: 0.2, beat: 0, bpm: 0, silent: true };
   params.speed = 0.4;
-  const field = figure.step(dt, t, live, params);
-  renderer.draw([{ field, look: figureLook, gain: 1, accent: 0 }], dt, 0);
+  camera.step(dt, t, live);
+  // The layer's field is overscanned, so even the intro has to look at it through the camera.
+  sampleThrough(figure.step(dt, t, live, params), figure.cols, figure.rows, camera.view(FIGURE_DEPTH), views.figure, renderer.cols, renderer.rows);
+  renderer.draw([{ field: views.figure, look: figureLook, gain: 1, accent: 0 }], dt, 0);
 }
 
 async function start(source) {
@@ -565,6 +646,7 @@ async function start(source) {
 allocMasks();
 params.density = 0.25;
 setAccent("bone");
+directing = new Directing({ chipsEl: document.getElementById("direction-chips"), noteEl: noteInput, onChange: directed });
 document.fonts.ready.then(() => renderer.resize()).finally(() => {
   rebuildGrid();
   requestAnimationFrame(idleFrame);
@@ -599,10 +681,35 @@ window.addEventListener("resize", () => {
 noteInput.addEventListener("keydown", (e) => {
   // Enter applies the note straight away: Jev re-judges with the new context.
   if (e.key === "Enter") {
+    e.preventDefault();
     noteInput.blur();
     askNow();
   }
 });
+
+// Press and hold the picture to keep it; flick it aside to turn it down.
+let pointerFrom = null;
+let holdTimer = 0;
+canvas.addEventListener("pointerdown", (e) => {
+  if (idle) return;
+  pointerFrom = { x: e.clientX, y: e.clientY };
+  holdTimer = setTimeout(() => setHeld(true), HOLD_MS);
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (!pointerFrom) return;
+  const dx = e.clientX - pointerFrom.x;
+  if (Math.abs(dx) < SWIPE_PX || Math.abs(e.clientY - pointerFrom.y) > Math.abs(dx)) return;
+  clearTimeout(holdTimer);
+  pointerFrom = null;
+  rejectCurrent();
+});
+for (const event of ["pointerup", "pointercancel", "pointerleave"]) {
+  canvas.addEventListener(event, () => {
+    clearTimeout(holdTimer);
+    pointerFrom = null;
+    setHeld(false);
+  });
+}
 window.addEventListener("keydown", (e) => {
   if (e.target === noteInput) return;
   if (idle) {
